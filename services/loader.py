@@ -21,7 +21,7 @@ def load_services(): # <-- Removed 'wait_for_ollama'
     oww_model = Model(wakeword_model_paths=model_paths)
 
     stt_service = STTService()
-    llm_service = LLMService()
+    llm_service = LLMService(model='llama3.1:8b-instruct-q4_K_M')
     tts_service = TTSService() # <-- Initialize the TTS service
 
     print("Warming up models (this may take a moment)...")

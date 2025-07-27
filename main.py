@@ -2,35 +2,47 @@ import pyaudio
 import sys
 import logging
 from datetime import datetime
+import time
 import subprocess
 
 # Import from the services package
 from services.loader import load_services
 from services.wakeword import WakeWordService
-from services.logger import setup_logger
+from services.logger import setup_logging
+from services.memory_logger import MemoryLogger # <-- Import the new service
 
 def main():
+    # --- Performance Timers ---
+    app_start_time = time.time()
+
     # --- Configuration ---
     FORMAT = pyaudio.paInt16
     CHANNELS = 1
     RATE = 16000
     VAD_FRAME_SAMPLES = int(RATE * (30 / 1000.0))
-    WAKEWORD_THRESHOLD = 0.5 # Confidence threshold for detection
-    # --- End Configuration ---
-
-    log = setup_logger()
+    WAKEWORD_THRESHOLD = 0.5
+    
+    log = setup_logging()
+    mem_logger = MemoryLogger()
     
     try:
+        mem_logger.start() # <-- Start VRAM logging
+
         # Load all services
+        log.info("--- Loading all services ---")
         vad, oww_model, stt_service, llm_service, tts_service = load_services()
         kwd_service = WakeWordService(oww_model, vad)
 
-        # Use the TTS service to give a welcome message
+        # --- T1: App Start to Wakeword Ready ---
+        wakeword_ready_time = time.time()
+        log.info(f"--- Models loaded. Time to wakeword ready: {wakeword_ready_time - app_start_time:.2f} seconds ---")
+        
         tts_service.speak("Hi Master! Miss Heart at your services.")
 
     except Exception as e:
         log.error(f"Failed to load services: {e}", exc_info=True)
         print(f"[ERROR] Failed to load services: {e}")
+        mem_logger.stop() # Ensure logger stops on error
         return
 
     pa = pyaudio.PyAudio()
@@ -48,55 +60,64 @@ def main():
     try:
         while True:
             audio_chunk = stream.read(VAD_FRAME_SAMPLES, exception_on_overflow=False)
-            
-            # The wakeword service will return a prediction dictionary when it has a complete utterance
             prediction, utterance_buffer = kwd_service.process_audio(audio_chunk)
 
-            # --- CORRECTED WAKE WORD LOGIC ---
             if prediction:
-                # Find the wake word with the highest score
                 top_wakeword = max(prediction, key=prediction.get)
                 top_score = prediction[top_wakeword]
 
-                # ONLY proceed if the score is above the threshold
                 if top_score >= WAKEWORD_THRESHOLD:
                     log.info(f"--- Actionable wake word detected: {top_wakeword} (Score: {top_score:.2f}) ---")
                     
                     stream.stop_stream()
 
-                    # --- INTERACTION BLOCK ---
                     print(f'\n🎙️  Wake word "{top_wakeword.replace("_v0.1.onnx", "")}" detected, listening for command...')
                     transcription = stt_service.listen_and_transcribe(timeout_ms=3000)
                     
                     if transcription:
+                        speech_end_time = time.time()
                         print(f'🗣️  Transcription: "{transcription}"')
+                        
+                        # --- T2 & T3 Timer Start ---
+                        llm_start_time = time.time()
                         llm_response = llm_service.get_response(transcription)
+                        llm_end_time = time.time()
+                        
+                        tts_start_time = time.time()
                         print(f"🤖 LLM Response: {llm_response}")
                         tts_service.speak(llm_response)
                         
-                        # Follow-up loop
+                        # --- Log Performance Timers ---
+                        log.info(f"--- Time to LLM response: {llm_end_time - llm_start_time:.2f} seconds ---")
+                        log.info(f"--- Time from speech end to TTS start: {tts_start_time - speech_end_time:.2f} seconds ---")
+
                         while True:
                             print("\nListening for follow-up...")
                             follow_up = stt_service.listen_and_transcribe(timeout_ms=4000)
+                            speech_end_time = time.time()
                             
                             if follow_up:
                                 print(f'🗣️  Transcription: "{follow_up}"')
+                                llm_start_time = time.time()
                                 llm_response = llm_service.get_response(follow_up)
+                                llm_end_time = time.time()
+
+                                tts_start_time = time.time()
                                 print(f"🤖 LLM Response: {llm_response}")
                                 tts_service.speak(llm_response)
+
+                                log.info(f"--- Time to LLM response: {llm_end_time - llm_start_time:.2f} seconds ---")
+                                log.info(f"--- Time from speech end to TTS start: {tts_start_time - speech_end_time:.2f} seconds ---")
                             else:
                                 print("\nDialog ended due to inactivity.")
                                 break
                     else:
                         log.info("STT service returned no transcription.")
                         print("No transcription was returned.")
-                    # --- END OF INTERACTION BLOCK ---
 
-                    # Now, restart the stream and enter cooldown
                     stream.start_stream() 
                     kwd_service.enter_cooldown()
                     print("\n--- Waiting for wake word ---")
-            # --- END OF CORRECTED LOGIC ---
 
     except KeyboardInterrupt:
         print(f"\n🛑 [{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] --- Stopping ---")
@@ -106,6 +127,7 @@ def main():
             stream.close()
         pa.terminate()
         
+        mem_logger.stop() # <-- Stop VRAM logging
         log.info("--- Resources released ---")
         logging.shutdown()
 
