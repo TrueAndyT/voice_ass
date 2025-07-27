@@ -1,32 +1,61 @@
-import pyaudio
+import torch
+from kokoro import KPipeline
+import sounddevice as sd
 import numpy as np
-from kokoro.tts import TTS # Using the correct 'kokoro' library
 
 class TTSService:
-    """A service for synthesizing speech using the Kokoro TTS model."""
+    """A service for text-to-speech using the Kokoro TTS model."""
 
-    def __init__(self, voice_model="af_heart"):
-        # The user must ensure this model is downloaded and available.
-        # This path structure is an assumption based on Coqui TTS standards.
-        model_path = f"tts_models/en/vctk/{voice_model}"
-        vocoder_path = "vocoder_models/en/ljspeech/hifigan_v2"
-        print(f"Loading TTS model: {model_path}")
-        try:
-            self.tts_engine = TTS(model_path=model_path, vocoder_path=vocoder_path, progress_bar=False)
-        except Exception as e:
-            print(f"Error: Could not load TTS model. Ensure the voice model '{voice_model}' is correctly placed at '{model_path}'.")
-            raise e
+    def __init__(self, voice_model='af_heart'):
+        if torch.cuda.is_available():
+            self.device = "cuda"
+        else:
+            self.device = "cpu"
+        
+        print(f"Kokoro TTS using device: {self.device}")
+        
+        self.pipeline = KPipeline(lang_code='a', device=self.device)
+        self.voice_model = voice_model
+        self.sample_rate = 24000
 
     def speak(self, text):
-        """Synthesizes the given text and plays it as audio."""
-        if not text: return
-        print(f"🔊 Speaking: {text}")
+        """
+        Generates audio from text and plays it.
+        This version concatenates all audio chunks before playback for stability.
+        """
+        print(f"TTS saying: '{text}'")
         try:
-            wav_data = self.tts_engine.tts(text)
-            audio_bytes = (np.array(wav_data) * 32767).astype(np.int16).tobytes()
-            pa = pyaudio.PyAudio()
-            stream = pa.open(format=pyaudio.paInt16, channels=1, rate=22050, output=True) # Kokoro default rate is 22050
-            stream.write(audio_bytes)
-            stream.stop_stream(); stream.close(); pa.terminate()
+            generator = self.pipeline(text, voice=self.voice_model)
+            
+            all_audio_chunks = []
+            for i, (gs, ps, audio) in enumerate(generator):
+                if isinstance(audio, torch.Tensor):
+                    audio = audio.cpu().numpy()
+                
+                if audio.dtype != np.float32:
+                     audio = audio.astype(np.float32) / np.iinfo(audio.dtype).max
+                
+                all_audio_chunks.append(audio)
+
+            # Check if any audio was generated
+            if all_audio_chunks:
+                # Combine all chunks into a single audio array
+                full_audio = np.concatenate(all_audio_chunks)
+                
+                # Play the consolidated audio and wait for it to finish
+                sd.play(full_audio, self.sample_rate)
+                sd.wait()
+            
         except Exception as e:
             print(f"Error during TTS playback: {e}")
+
+    def warmup(self):
+        """Warms up the TTS model."""
+        print("Warming up Kokoro TTS...")
+        try:
+            generator = self.pipeline(" ", voice=self.voice_model)
+            for _ in generator:
+                pass
+            print("Kokoro TTS is ready.")
+        except Exception as e:
+            print(f"Error during TTS warmup: {e}")

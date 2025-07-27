@@ -2,16 +2,12 @@ import torch
 import webrtcvad
 import numpy as np
 import os
-import subprocess
-import atexit
-import time
-import requests
 from openwakeword.model import Model
 from .stt_service import STTService
 from .llm_service import LLMService
+from .tts_service import TTSService # <-- Import the new service
 
-
-def load_services():
+def load_services(): # <-- Removed 'wait_for_ollama'
     """Loads and warms up all AI models."""
     print("Loading services...")
     
@@ -26,20 +22,28 @@ def load_services():
 
     stt_service = STTService()
     llm_service = LLMService()
+    tts_service = TTSService() # <-- Initialize the TTS service
 
     print("Warming up models (this may take a moment)...")
 
+    # Warm up OpenWakeWord
     oww_chunk_samples = 1280
     silent_oww_chunk = np.zeros(oww_chunk_samples, dtype=np.int16)
     oww_model.predict(silent_oww_chunk)
 
+    # Warm up Whisper STT
     if stt_service.device == 'cuda':
         rate = 16000
         silent_whisper_chunk = np.zeros(rate, dtype=np.float32)
         stt_service.model.transcribe(silent_whisper_chunk, fp16=True)
 
+    # Warm up Kokoro TTS
+    tts_service.warmup() # <-- Add warmup call for TTS
+
+    # Warm up LLM
     llm_service.get_response("Respond with only the word 'ready'")
 
     print("✅ Models are loaded and ready.")
     
-    return vad, oww_model, stt_service, llm_service
+    # Return all service instances
+    return vad, oww_model, stt_service, llm_service, tts_service
