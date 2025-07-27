@@ -13,17 +13,26 @@ RATE = 16000
 VAD_FRAME_MS = 30
 VAD_FRAME_SAMPLES = int(RATE * (VAD_FRAME_MS / 1000.0))
 MAX_INT16 = 32767.0
-RMS_THRESHOLD = 0.15 # UPDATED
+RMS_THRESHOLD = 0.15 
 
 class STTService:
     """A service for transcribing speech using the Whisper ASR model."""
 
     def __init__(self, model_size="small"):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            try:
+                _ = torch.cuda.get_device_name(0)
+                self.device = "cuda"
+            except Exception as e:
+                print(f"⚠️ CUDA is available but failed to initialize: {e}")
+                self.device = "cpu"
+        else:
+            self.device = "cpu"
+
         print(f"Whisper using device: {self.device}")
         self.model = whisper.load_model(model_size, device=self.device)
         self.vad = webrtcvad.Vad(3)
-        self.allowed_languages = {'en', 'uk'} # Define allowed languages
+        self.allowed_languages = {'en', 'uk'}
 
     def _write_transcription_to_log(self, text):
         """Saves the transcription to a timestamped log file."""
@@ -40,8 +49,7 @@ class STTService:
 
     def listen_and_transcribe(self, timeout_ms=3000):
         """
-        Listens for audio, records until silence, transcribes,
-        and ensures the output language is either English or Ukrainian.
+        Listens for audio, records until silence, and transcribes.
         """
         pa = pyaudio.PyAudio()
         stream = pa.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=VAD_FRAME_SAMPLES)
@@ -82,18 +90,28 @@ class STTService:
             print("Recording too short, skipping transcription.")
             return ""
 
-        # First, transcribe with language auto-detection
-        result = self.model.transcribe(audio_np, fp16=(self.device=="cuda"))
+        # --- MODIFIED TRANSCRIPTION CALL ---
+        # Added no_speech_threshold to prevent hallucinations on silent audio
+        result = self.model.transcribe(
+            audio_np, 
+            fp16=(self.device=="cuda"), 
+            no_speech_threshold=0.6
+        )
+        # --- END OF MODIFICATION ---
         
-        # Check if the detected language is allowed
         detected_language = result.get('language')
         if detected_language not in self.allowed_languages:
             print(f"Detected language '{detected_language}' is not supported. Forcing transcription to English as a fallback.")
-            # If not allowed, re-transcribe and force the language to English
-            result = self.model.transcribe(audio_np, fp16=(self.device=="cuda"), language='en')
+            result = self.model.transcribe(
+                audio_np, 
+                fp16=(self.device=="cuda"), 
+                language='en',
+                no_speech_threshold=0.6
+            )
 
         transcription = result['text'].strip()
         
-        self._write_transcription_to_log(transcription)
+        if transcription: # Only log if there is a transcription
+            self._write_transcription_to_log(transcription)
         
         return transcription
