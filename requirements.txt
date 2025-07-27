@@ -1,0 +1,23 @@
+# requirements.txt
+
+# Audio Processing
+pyaudio
+webrtcvad
+numpy
+
+# Wake Word Detection
+openwakeword==0.5.1
+onnxruntime
+
+# Whisper STT
+torch
+openai-whisper
+
+# LLM via Ollama
+ollama
+
+# TTS via Kokoro
+kokoro
+
+# Logging and Utility
+requests

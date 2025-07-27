@@ -1,0 +1,41 @@
+# Bytecode and compiled files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+.env/
+
+# Log and audio output
+logs/
+llm/
+stt/
+*.log
+*.wav
+rates.txt
+
+# Editor files
+.vscode/
+*.swp
+*.swo
+*~
+.idea/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Docker artifacts
+*.pid
+*.sock
+
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# Temporary
+*.tmp
