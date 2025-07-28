@@ -39,3 +39,14 @@ dist/
 
 # Temporary
 *.tmp
+
+# API Keys and sensitive information
+*.key
+*.pem
+*.env
+.env.local
+config.js
+secrets.js
+api_keys.py
+credentials.json
+token.json

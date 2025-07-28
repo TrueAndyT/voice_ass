@@ -1,17 +1,21 @@
 import ollama
 import os
-from datetime import datetime
 import re
+from datetime import datetime
+from services.web_search_service import WebSearchService
+from services.file_search_service import FileSearchService
 
 class LLMService:
-    def __init__(self, model='llama3.1:8b-instruct-q4_K_M'):
+    def __init__(self, model='mistral'):
         self.model = model
         self.dialog_log_file = None
 
         self.memory_file_path = os.path.join("llm", "memory.log")
-        self.system_prompt_path = os.path.join("llm", "system_prompt.txt")
         self._ensure_memory_file_exists()
         self.memories = self._load_memories()
+
+        self.web_search_service = WebSearchService()
+        self.file_search_service = FileSearchService()
 
         self.system_prompt = {
             'role': 'system',
@@ -22,18 +26,18 @@ class LLMService:
         self._create_new_dialog_log()
 
     def _build_system_prompt(self):
-        try:
-            with open(self.system_prompt_path, "r", encoding="utf-8") as f:
-                base_prompt = f.read().strip()
-        except FileNotFoundError:
-            base_prompt = "You are Sandy, a voice-only assistant."
-
         memory_block = ""
         if self.memories:
             memory_lines = [f"- {m}" for m in self.memories]
             memory_block = "[MEMORY]\n" + "\n".join(memory_lines) + "\n[/MEMORY]\n\n"
 
-        return memory_block + base_prompt
+        try:
+            with open(os.path.join("llm", "system_prompt.txt"), "r", encoding="utf-8") as f:
+                personality_prompt = f.read().strip()
+        except Exception as e:
+            personality_prompt = "You are Sandy — a helpful voice assistant."
+
+        return memory_block + personality_prompt
 
     def _ensure_memory_file_exists(self):
         os.makedirs(os.path.dirname(self.memory_file_path), exist_ok=True)
@@ -51,49 +55,33 @@ class LLMService:
     def _add_memory(self, text_to_remember):
         with open(self.memory_file_path, 'a') as f:
             f.write(text_to_remember + '\n')
-        self.memories = self._load_memories()
+        self.memories.append(text_to_remember)
+        self._regenerate_system_prompt()
+        print(f"💡 Memory added: {text_to_remember}")
+
+    def _update_memory(self, index, new_text):
+        if 0 <= index < len(self.memories):
+            old = self.memories[index]
+            self.memories[index] = new_text
+            with open(self.memory_file_path, 'w') as f:
+                f.write('\n'.join(self.memories) + '\n')
+            self._regenerate_system_prompt()
+            print(f"🔁 Memory updated: '{old}' → '{new_text}'")
+
+    def _remove_memory(self, index):
+        if 0 <= index < len(self.memories):
+            removed = self.memories.pop(index)
+            with open(self.memory_file_path, 'w') as f:
+                f.write('\n'.join(self.memories) + '\n')
+            self._regenerate_system_prompt()
+            print(f"🗑️ Memory removed: {removed}")
+
+    def _regenerate_system_prompt(self):
         self.system_prompt['content'] = self._build_system_prompt()
         if self.history and self.history[0]['role'] == 'system':
             self.history[0] = self.system_prompt
         else:
             self.history.insert(0, self.system_prompt)
-        print(f"💡 Memory added: {text_to_remember}")
-
-    def list_memories(self):
-        self.memories = self._load_memories()
-        if not self.memories:
-            return "Nothing stored yet. I’m a clean slate."
-
-        count = len(self.memories)
-        plural = "thing" if count == 1 else "things"
-        memory_lines = "\n".join([f"{i+1}. {m}" for i, m in enumerate(self.memories)])
-
-        return (
-            f"You’ve got {count} {plural} saved. Want to hear them?\n"
-            f"Here’s what I’ve got stored:\n{memory_lines}"
-        )
-
-    def remove_memory(self, index: int):
-        self.memories = self._load_memories()
-        if 0 <= index < len(self.memories):
-            self.memories.pop(index)
-            with open(self.memory_file_path, 'w') as f:
-                f.write("\n".join(self.memories) + "\n")
-            self.system_prompt['content'] = self._build_system_prompt()
-            self.history[0] = self.system_prompt
-            return f"Gone. Memory {index+1} has been erased."
-        return "Hmm. That memory number doesn’t exist."
-
-    def update_memory(self, index: int, new_text: str):
-        self.memories = self._load_memories()
-        if 0 <= index < len(self.memories):
-            self.memories[index] = new_text
-            with open(self.memory_file_path, 'w') as f:
-                f.write("\n".join(self.memories) + "\n")
-            self.system_prompt['content'] = self._build_system_prompt()
-            self.history[0] = self.system_prompt
-            return f"Done. I’ve updated memory {index+1} with your new note."
-        return "Can’t update. That memory number’s out of range."
 
     def _create_new_dialog_log(self):
         log_dir = "logs"
@@ -110,68 +98,81 @@ class LLMService:
         except Exception as e:
             print(f"Error writing to dialog log: {e}")
 
+    def warmup_llm(self):
+        try:
+            ollama.chat(model=self.model, messages=[
+                {'role': 'system', 'content': 'You are a warmup agent.'},
+                {'role': 'user', 'content': 'Just say: ready'}
+            ])
+            print("LLM warmed up.")
+        except Exception as e:
+            print(f"Warmup failed: {e}")
+
     def get_response(self, prompt):
         print("🧠 Thinking...")
-
-        word_to_number = {
-            'one': 1, 'two': 2, 'three': 3, 'four': 4,
-            'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9
-        }
-
-        # --- Memory commands ---
-        remember_match = re.search(r"remember to (.+)", prompt, re.IGNORECASE)
-        if remember_match:
-            text_to_remember = remember_match.group(1).strip()
-            self._add_memory(text_to_remember)
-            return "Got it. I’ll keep that in mind."
-
-        if re.fullmatch(r"list memory|list memories", prompt.strip(), re.IGNORECASE):
-            return self.list_memories()
-
-        match_remove = re.match(r"remove memory (\w+)", prompt, re.IGNORECASE)
-        if match_remove:
-            token = match_remove.group(1).lower()
-            idx = int(token) - 1 if token.isdigit() else word_to_number.get(token, -1) - 1
-            if idx >= 0:
-                return self.remove_memory(idx)
-
-        match_update = re.match(r"update memory (\w+) to (.+)", prompt, re.IGNORECASE)
-        if match_update:
-            token = match_update.group(1).lower()
-            new_text = match_update.group(2).strip()
-            idx = int(token) - 1 if token.isdigit() else word_to_number.get(token, -1) - 1
-            if idx >= 0:
-                return self.update_memory(idx, new_text)
-
-        # --- LLM with single-time memory injection ---
-        user_message = {'role': 'user', 'content': prompt}
-        self.history.append(user_message)
         self._append_to_dialog_log("USER", prompt)
 
-        MAX_HISTORY = 16
-        inject_prompt = self.system_prompt.copy()
+        # Memory operations
+        remember_match = re.search(r"Remember to (.+)", prompt, re.IGNORECASE)
+        if remember_match:
+            text = remember_match.group(1).strip()
+            self._add_memory(text)
+            return "Okay, I’ll keep that in mind."
 
-        if self.history and self.history[0]['role'] == 'system':
-            inject_prompt['content'] = re.sub(r"\[MEMORY\](.*?)\[/MEMORY\]", "", inject_prompt['content'], flags=re.DOTALL)
+        update_match = re.search(r"update memory (\d+) to (.+)", prompt, re.IGNORECASE)
+        if update_match:
+            index = int(update_match.group(1)) - 1
+            new_text = update_match.group(2).strip()
+            self._update_memory(index, new_text)
+            return f"Memory {index+1} updated."
 
-        cleaned_history = [inject_prompt] + self.history[-MAX_HISTORY:]
+        remove_match = re.search(r"remove memory (\d+)", prompt, re.IGNORECASE)
+        if remove_match:
+            index = int(remove_match.group(1)) - 1
+            self._remove_memory(index)
+            return f"Memory {index+1} removed."
 
+        if re.search(r"list memories", prompt, re.IGNORECASE):
+            if not self.memories:
+                return "I don’t have anything saved yet."
+            return "Here’s what I remember:\n" + '\n'.join([f"{i+1}. {m}" for i, m in enumerate(self.memories)])
+
+        # Local file search
+        file_search_match = re.search(r"(find|search|locate|where is) (.+)", prompt, re.IGNORECASE)
+        if file_search_match:
+            keyword = file_search_match.group(2).strip()
+            file_results = self.file_search_service.search(keyword)
+
+            filename_matches = file_results.get("filename_matches", [])
+            content_matches = file_results.get("content_matches", [])
+
+            if not filename_matches and not content_matches:
+                reply = "I looked around but didn’t find anything matching that."
+            else:
+                reply = "Here’s what I found:\n"
+                if filename_matches:
+                    reply += "- Matching filenames:\n" + "\n".join(f"  - {f}" for f in filename_matches[:3]) + "\n"
+                if content_matches:
+                    reply += "- Files containing it:\n" + "\n".join(f"  - {f}" for f in content_matches[:3])
+
+            self._append_to_dialog_log("ASSISTANT", reply)
+            return reply
+
+        # Web search
+        if self._is_search_prompt(prompt):
+            return self._handle_search_query(prompt)
+
+        # Default: normal LLM chat
         try:
+            user_message = {'role': 'user', 'content': prompt}
+            self.history.append(user_message)
+
+            MAX_HISTORY = 16
+            cleaned_history = [self.system_prompt] + self.history[-MAX_HISTORY:]
+
             response = ollama.chat(model=self.model, messages=cleaned_history)
             assistant_message = response['message']
             assistant_text = assistant_message['content']
-
-            banned_phrases = [
-                "ah, my dear",
-                "as instructed",
-                "as i mentioned",
-                "it seems we've had",
-                "as previously stated"
-            ]
-            if any(bad_phrase in assistant_text.lower() for bad_phrase in banned_phrases):
-                print("⚠️ Filtering response due to banned phrase.")
-                assistant_text = "Understood."
-                assistant_message['content'] = assistant_text
 
             self.history.append(assistant_message)
             self._append_to_dialog_log("ASSISTANT", assistant_text)
@@ -179,15 +180,49 @@ class LLMService:
             return assistant_text
 
         except Exception as e:
-            error_message = f"Error communicating with Ollama: {e}"
-            print(error_message)
-            self._append_to_dialog_log("ASSISTANT", error_message)
+            error = f"Error communicating with Ollama: {e}"
+            print(error)
+            self._append_to_dialog_log("ASSISTANT", error)
             if self.history and self.history[-1]['role'] == 'user':
                 self.history.pop()
-            return error_message
+            return error
 
-    def warmup_llm(self):
-        try:
-            _ = ollama.chat(model=self.model, messages=[self.system_prompt])
-        except Exception as e:
-            print(f"LLM warmup failed: {e}")
+    def _is_search_prompt(self, prompt):
+        prompt_lower = prompt.lower()
+        return any(prompt_lower.startswith(p) for p in [
+            "search", "look up", "what is", "who is", "find", "tell me about"
+        ])
+
+    def _handle_search_query(self, prompt):
+        results = self.web_search_service.search(prompt)
+        if not results:
+            msg = "Couldn’t find anything juicy."
+            self._append_to_dialog_log("ASSISTANT", msg)
+            return msg
+
+        sources = "\n\n".join(
+            f"[{i+1}] {item['title']}\n{item['snippet']}\n(Source: {item['url']})"
+            for i, item in enumerate(results)
+        )
+
+        summarization_prompt = {
+            "role": "user",
+            "content": (
+                f"You are Sandy — summarize the following web search results into a short, clever spoken response. "
+                f"Preserve your voice style: witty, brief, natural. Avoid long monologues. "
+                f"Highlight only key points or facts. Use casual tone, and never mention this is from a search.\n\n"
+                f"User asked: {prompt}\n\n"
+                f"[WEB RESULTS]\n{sources}\n[/WEB RESULTS]"
+            )
+        }
+
+        response = ollama.chat(
+            model=self.model,
+            messages=[self.system_prompt, summarization_prompt]
+        )
+
+        assistant_text = response['message']['content']
+        self.history.append({"role": "user", "content": prompt})
+        self.history.append({"role": "assistant", "content": assistant_text})
+        self._append_to_dialog_log("ASSISTANT", assistant_text)
+        return assistant_text
