@@ -4,11 +4,16 @@ import time
 import os
 
 class MemoryLogger:
-    def __init__(self, log_file='memory.log', interval=1):
+    def __init__(self, log_file=os.path.join('logs', 'memory.log'), interval=1): # <-- MODIFIED
         self.log_file = log_file
         self.interval = interval
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._log_vram_usage, daemon=True)
+
+        # Ensure the 'logs' directory exists before trying to remove the file
+        log_dir = os.path.dirname(self.log_file)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
 
         # Clear the old log file at the start of a new session
         if os.path.exists(self.log_file):

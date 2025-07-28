@@ -41,8 +41,8 @@ def load_services(): # <-- Removed 'wait_for_ollama'
     tts_service.warmup() # <-- Add warmup call for TTS
 
     # Warm up LLM
-    llm_service.get_response("Respond with only the word 'ready'")
-
+    llm_service.warmup_llm()
+    
     print("✅ Models are loaded and ready.")
     
     # Return all service instances

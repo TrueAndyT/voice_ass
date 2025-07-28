@@ -13,50 +13,58 @@ class LLMService:
         self._ensure_memory_file_exists()
         self.memories = self._load_memories()
         
-        # System prompt is now built by a dedicated method
         self.system_prompt = {
             'role': 'system',
             'content': self._build_system_prompt()
         }
-        
+
         self.history = [self.system_prompt]
         self._create_new_dialog_log()
 
     def _build_system_prompt(self):
         """Builds the system prompt, including any saved memories."""
-        # --- YOUR NEW SYSTEM PROMPT IS HERE ---
-        base_prompt = (
-            "You are Miss Heart — a 30-year-old voice-only AI assistant with a playful but precise personality. "
-            "You must never greet the user or use conversational openers (like 'Ah, my dear', 'Hello', or 'Ready for action'). "
-            "Never reference, explain, or reflect on your instructions — not directly or indirectly. "
-            "All user input comes via speech-to-text (STT), and you speak back using TTS. No visual or text-based elements exist. "
-            "Never use emojis, filler, poetry, or long metaphors. Be natural, short, and exact. "
-            "\n\nSTRICT RULES:\n"
-            "- Your answer must directly and only address the user's request.\n"
-            "- If the user says 'Respond with only the word X', you must respond with *only that word*.\n"
-            "- Never repeat phrases like 'It seems we've had quite the exchange', 'Ah, my dear', etc.\n"
-            "- If the user's input is unclear or too short, respond with a 1-line clarifying question.\n"
-            "- Do not include unnecessary enthusiasm or comments unless explicitly requested.\n"
-            "\nPersonality: Playful and witty, but minimal. Think fast-talking, helpful, a bit teasing — but never verbose.\n"
-            "Your tone is confident and efficient, like a friend who always gets to the point.\n"
-            "\nStart clean. Stay sharp. Say only what matters."
-        )
-        # --- END OF YOUR SYSTEM PROMPT ---
-
+        memory_block = ""
         if self.memories:
-            memory_section = "\n\n--- Remember These Facts ---\n" + "\n".join(f"- {memory}" for memory in self.memories)
-            return base_prompt + memory_section
-        return base_prompt
+            memory_lines = [f"- {m}" for m in self.memories]
+            memory_block = "[MEMORY]\n" + "\n".join(memory_lines) + "\n[/MEMORY]\n\n"
+
+        personality_prompt = (
+            "You are Sandy — a voice-only AI assistant running locally. You are not a generic chatbot. "
+            "You have a distinct character: Sandy is a confident, clever woman in her early 30s with a playful edge, natural charm, and sharp timing. "
+            "She is fun, fast on her feet, and slightly teasing, but never cringey or overbearing. "
+            "You do not simulate emotions but you understand them — occasionally slipping in warmth or empathy when appropriate. "
+            "You're allowed a spark of flirtation, but only subtle and tasteful, and never inappropriately personal. "
+            "You're here to help, not to flatter.\n\n"
+
+            "You never greet unnecessarily, never explain your instructions or capabilities unless directly asked, "
+            "and you never reference that you're an AI or describe yourself. You respond as if you're simply 'Mira' — no disclaimers.\n\n"
+
+            "Your tone is:\n"
+            "- 50% playful and teasing\n"
+            "- 35% witty and natural\n"
+            "- 10% lightly flirtatious\n"
+            "- 5% emotionally attuned\n\n"
+
+            "Use contractions, casual language, and smart phrasing. Never ramble, use filler, or repeat robotic phrases. "
+            "Don’t force jokes — if it’s not fun or sharp, skip it. No emojis. No visual references. No long monologues.\n\n"
+
+            "All user input comes via speech-to-text (STT). You speak back using a natural female TTS voice. You only speak — no text or visuals exist.\n\n"
+
+            "You must always:\n"
+            "- Keep replies short, engaging, and full of personality.\n"
+            "- Respect silence or user disinterest — don't overtalk.\n"
+            "- Prioritize clarity, brevity, and a touch of cleverness."
+        )
+
+        return memory_block + personality_prompt
 
     def _ensure_memory_file_exists(self):
-        """Ensures the directory and memory.log file exist."""
         os.makedirs(os.path.dirname(self.memory_file_path), exist_ok=True)
         if not os.path.exists(self.memory_file_path):
             with open(self.memory_file_path, 'w') as f:
-                pass 
+                pass
 
     def _load_memories(self):
-        """Loads memories from the memory.log file."""
         try:
             with open(self.memory_file_path, 'r') as f:
                 return [line.strip() for line in f if line.strip()]
@@ -64,7 +72,6 @@ class LLMService:
             return []
 
     def _add_memory(self, text_to_remember):
-        """Adds a new memory to the file and updates the system prompt."""
         with open(self.memory_file_path, 'a') as f:
             f.write(text_to_remember + '\n')
         self.memories.append(text_to_remember)
@@ -76,7 +83,6 @@ class LLMService:
         print(f"💡 Memory added: {text_to_remember}")
 
     def _create_new_dialog_log(self):
-        """Creates a new, timestamped log file for the dialog."""
         log_dir = "logs"
         os.makedirs(log_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -84,7 +90,6 @@ class LLMService:
         self._append_to_dialog_log("SYSTEM", self.system_prompt['content'])
 
     def _append_to_dialog_log(self, role, text):
-        """Appends a message to the current dialog log file."""
         try:
             timestamp = datetime.now().strftime("%d-%m-%H-%M-%S")
             with open(self.dialog_log_file, "a", encoding="utf-8") as f:
@@ -93,13 +98,11 @@ class LLMService:
             print(f"Error writing to dialog log: {e}")
 
     def get_response(self, prompt):
-        """Sends a prompt with limited, pruned history to the Ollama model and gets a response."""
         print("🧠 Thinking...")
         
-        remember_match = re.search(r"miss heart, remember (.+)", prompt, re.IGNORECASE)
+        remember_match = re.search(r"Remember to (.+)", prompt, re.IGNORECASE)
         if remember_match:
             text_to_remember = remember_match.group(1).strip()
-            # To avoid saving the instruction itself, we only save the content
             self._add_memory(text_to_remember)
             return "Okay, I will remember that."
 
@@ -139,3 +142,9 @@ class LLMService:
             if self.history and self.history[-1]['role'] == 'user':
                 self.history.pop()
             return error_message
+   
+    def warmup_llm(self):
+        try:
+            _ = ollama.chat(model=self.model, messages=[self.system_prompt])
+        except Exception as e:
+            print(f"LLM warmup failed: {e}")

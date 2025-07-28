@@ -5,6 +5,8 @@ import webrtcvad
 import numpy as np
 import os
 from datetime import datetime
+import logging # <-- Import logging
+from logging.handlers import TimedRotatingFileHandler # <-- Import the handler
 
 # --- Configuration ---
 FORMAT = pyaudio.paInt16
@@ -34,18 +36,42 @@ class STTService:
         self.vad = webrtcvad.Vad(3)
         self.allowed_languages = {'en', 'uk'}
 
+        # --- NEW: Set up the dedicated STT logger ---
+        self.stt_logger = self._setup_stt_logger()
+
+    def _setup_stt_logger(self):
+        """Sets up a timed rotating logger for STT transcriptions."""
+        log_dir = "logs"
+        os.makedirs(log_dir, exist_ok=True)
+        
+        logger = logging.getLogger("STTLogger")
+        logger.setLevel(logging.INFO)
+        logger.propagate = False # Prevent STT logs from appearing in the main app.log
+
+        # Clear existing handlers to prevent duplicates
+        if logger.hasHandlers():
+            logger.handlers.clear()
+
+        # Create a handler that rotates the log file every 2 days
+        handler = TimedRotatingFileHandler(
+            os.path.join(log_dir, "stt.log"), 
+            when='D',       # 'D' for day
+            interval=2,     # Rotate every 2 days
+            backupCount=5   # Keep 5 old log files
+        )
+        
+        # Simple formatter: just the timestamp and the message
+        formatter = logging.Formatter('%(asctime)s: %(message)s')
+        handler.setFormatter(formatter)
+        
+        logger.addHandler(handler)
+        return logger
+
     def _write_transcription_to_log(self, text):
-        """Saves the transcription to a timestamped log file."""
-        log_dir = "stt"
-        try:
-            os.makedirs(log_dir, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            filename = os.path.join(log_dir, f"stt_out_{timestamp}.log")
-            with open(filename, 'w') as f:
-                f.write(text)
-            print(f"Transcription saved to {filename}")
-        except Exception as e:
-            print(f"Error saving transcription: {e}")
+        """Saves the transcription to the rotating log file."""
+        # --- MODIFIED: Use the logger instead of writing a new file ---
+        self.stt_logger.info(text)
+        print("Transcription logged.")
 
     def listen_and_transcribe(self, timeout_ms=3000):
         """
@@ -90,14 +116,11 @@ class STTService:
             print("Recording too short, skipping transcription.")
             return ""
 
-        # --- MODIFIED TRANSCRIPTION CALL ---
-        # Added no_speech_threshold to prevent hallucinations on silent audio
         result = self.model.transcribe(
             audio_np, 
             fp16=(self.device=="cuda"), 
             no_speech_threshold=0.6
         )
-        # --- END OF MODIFICATION ---
         
         detected_language = result.get('language')
         if detected_language not in self.allowed_languages:
@@ -111,7 +134,7 @@ class STTService:
 
         transcription = result['text'].strip()
         
-        if transcription: # Only log if there is a transcription
+        if transcription:
             self._write_transcription_to_log(transcription)
         
         return transcription
