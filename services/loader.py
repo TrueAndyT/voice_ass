@@ -5,10 +5,9 @@ import os
 from openwakeword.model import Model
 from .stt_service import STTService
 from .llm_service import LLMService
-from .tts_service import TTSService # <-- Import the new service
+from .tts_service import TTSService
 
-def load_services(): # <-- Removed 'wait_for_ollama'
-    """Loads and warms up all AI models."""
+def load_services():
     print("Loading services...")
     
     vad = webrtcvad.Vad(1)
@@ -22,7 +21,7 @@ def load_services(): # <-- Removed 'wait_for_ollama'
 
     stt_service = STTService()
     llm_service = LLMService(model='llama3.1:8b-instruct-q4_K_M')
-    tts_service = TTSService() # <-- Initialize the TTS service
+    tts_service = TTSService()
 
     print("Warming up models (this may take a moment)...")
 
@@ -38,12 +37,11 @@ def load_services(): # <-- Removed 'wait_for_ollama'
         stt_service.model.transcribe(silent_whisper_chunk, fp16=True)
 
     # Warm up Kokoro TTS
-    tts_service.warmup() # <-- Add warmup call for TTS
+    tts_service.warmup()
 
-    # Warm up LLM
+    # Warm up LLM without polluting conversation
     llm_service.warmup_llm()
-    
+
     print("✅ Models are loaded and ready.")
     
-    # Return all service instances
     return vad, oww_model, stt_service, llm_service, tts_service
