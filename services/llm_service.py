@@ -89,7 +89,7 @@ class LLMService:
         if intent in self.handlers:
             reply = self.handlers[intent].handle(prompt)
             self._append_to_dialog_log("ASSISTANT", reply)
-            return reply
+            return ""
 
         # Default: general LLM chat
         try:
