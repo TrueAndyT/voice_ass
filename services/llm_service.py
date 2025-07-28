@@ -4,7 +4,7 @@ from datetime import datetime
 import re
 
 class LLMService:
-    def __init__(self, model='mistral'):
+    def __init__(self, model='llama3.1:8b-instruct-q4_K_M'):
         self.model = model
         self.dialog_log_file = None
 

@@ -37,7 +37,7 @@ def main():
         wakeword_ready_time = time.time()
         log.info(f"--- Models loaded. Time to wakeword ready: {wakeword_ready_time - app_start_time:.2f} seconds ---")
         
-        tts_service.speak("Hi Master! Miss Heart at your services.")
+        tts_service.speak("Hi Master! Sandy at your services.")
 
     except Exception as e:
         log.error(f"Failed to load services: {e}", exc_info=True)
