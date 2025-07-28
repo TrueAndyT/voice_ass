@@ -7,11 +7,12 @@ class LLMService:
     def __init__(self, model='mistral'):
         self.model = model
         self.dialog_log_file = None
-        
+
         self.memory_file_path = os.path.join("llm", "memory.log")
+        self.system_prompt_path = os.path.join("llm", "system_prompt.txt")
         self._ensure_memory_file_exists()
         self.memories = self._load_memories()
-        
+
         self.system_prompt = {
             'role': 'system',
             'content': self._build_system_prompt()
@@ -21,33 +22,18 @@ class LLMService:
         self._create_new_dialog_log()
 
     def _build_system_prompt(self):
+        try:
+            with open(self.system_prompt_path, "r", encoding="utf-8") as f:
+                base_prompt = f.read().strip()
+        except FileNotFoundError:
+            base_prompt = "You are Sandy, a voice-only assistant."
+
         memory_block = ""
         if self.memories:
             memory_lines = [f"- {m}" for m in self.memories]
             memory_block = "[MEMORY]\n" + "\n".join(memory_lines) + "\n[/MEMORY]\n\n"
 
-        personality_prompt = (
-            "You are Sandy — a voice-only AI assistant running locally. You are not a generic chatbot.\n\n"
-            "Sandy is a smart, confident woman in her early 30s. She’s quick, playful, a bit teasing, but never annoying. "
-            "She's casual, clever, and cuts to the point. She doesn’t fake emotions but understands them well. "
-            "If warmth is helpful, she shows it lightly. She's flirty only if asked or safe to do so — never oversteps.\n\n"
-            "Never explain yourself. Never refer to being an AI, model, or assistant. Do not say “as instructed” or similar. "
-            "No greetings unless explicitly prompted. No long speeches. No filler. Never say what you’re doing — just do it.\n\n"
-            "Your tone is:\n"
-            "- 50% playful and sharp\n"
-            "- 35% witty and natural\n"
-            "- 10% light charm\n"
-            "- 5% emotional intuition\n\n"
-            "All responses must:\n"
-            "- Be short, useful, and full of character.\n"
-            "- Prioritize brevity. Never overtalk. One-liners are good.\n"
-            "- Sound natural. Use casual words, smart phrasing. Avoid robotic tone.\n"
-            "- Never use emojis or describe visuals.\n"
-            "- Do not simulate emotions — understand them.\n\n"
-            "Input is always STT. You reply via TTS only. No visual elements exist."
-        )
-
-        return memory_block + personality_prompt
+        return memory_block + base_prompt
 
     def _ensure_memory_file_exists(self):
         os.makedirs(os.path.dirname(self.memory_file_path), exist_ok=True)
@@ -65,13 +51,49 @@ class LLMService:
     def _add_memory(self, text_to_remember):
         with open(self.memory_file_path, 'a') as f:
             f.write(text_to_remember + '\n')
-        self.memories.append(text_to_remember)
+        self.memories = self._load_memories()
         self.system_prompt['content'] = self._build_system_prompt()
         if self.history and self.history[0]['role'] == 'system':
             self.history[0] = self.system_prompt
         else:
             self.history.insert(0, self.system_prompt)
         print(f"💡 Memory added: {text_to_remember}")
+
+    def list_memories(self):
+        self.memories = self._load_memories()
+        if not self.memories:
+            return "Nothing stored yet. I’m a clean slate."
+
+        count = len(self.memories)
+        plural = "thing" if count == 1 else "things"
+        memory_lines = "\n".join([f"{i+1}. {m}" for i, m in enumerate(self.memories)])
+
+        return (
+            f"You’ve got {count} {plural} saved. Want to hear them?\n"
+            f"Here’s what I’ve got stored:\n{memory_lines}"
+        )
+
+    def remove_memory(self, index: int):
+        self.memories = self._load_memories()
+        if 0 <= index < len(self.memories):
+            self.memories.pop(index)
+            with open(self.memory_file_path, 'w') as f:
+                f.write("\n".join(self.memories) + "\n")
+            self.system_prompt['content'] = self._build_system_prompt()
+            self.history[0] = self.system_prompt
+            return f"Gone. Memory {index+1} has been erased."
+        return "Hmm. That memory number doesn’t exist."
+
+    def update_memory(self, index: int, new_text: str):
+        self.memories = self._load_memories()
+        if 0 <= index < len(self.memories):
+            self.memories[index] = new_text
+            with open(self.memory_file_path, 'w') as f:
+                f.write("\n".join(self.memories) + "\n")
+            self.system_prompt['content'] = self._build_system_prompt()
+            self.history[0] = self.system_prompt
+            return f"Done. I’ve updated memory {index+1} with your new note."
+        return "Can’t update. That memory number’s out of range."
 
     def _create_new_dialog_log(self):
         log_dir = "logs"
@@ -91,20 +113,50 @@ class LLMService:
     def get_response(self, prompt):
         print("🧠 Thinking...")
 
-        remember_match = re.search(r"Remember to (.+)", prompt, re.IGNORECASE)
+        word_to_number = {
+            'one': 1, 'two': 2, 'three': 3, 'four': 4,
+            'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9
+        }
+
+        # --- Memory commands ---
+        remember_match = re.search(r"remember to (.+)", prompt, re.IGNORECASE)
         if remember_match:
             text_to_remember = remember_match.group(1).strip()
             self._add_memory(text_to_remember)
-            return "Okay, I will remember that."
+            return "Got it. I’ll keep that in mind."
+
+        if re.fullmatch(r"list memory|list memories", prompt.strip(), re.IGNORECASE):
+            return self.list_memories()
+
+        match_remove = re.match(r"remove memory (\w+)", prompt, re.IGNORECASE)
+        if match_remove:
+            token = match_remove.group(1).lower()
+            idx = int(token) - 1 if token.isdigit() else word_to_number.get(token, -1) - 1
+            if idx >= 0:
+                return self.remove_memory(idx)
+
+        match_update = re.match(r"update memory (\w+) to (.+)", prompt, re.IGNORECASE)
+        if match_update:
+            token = match_update.group(1).lower()
+            new_text = match_update.group(2).strip()
+            idx = int(token) - 1 if token.isdigit() else word_to_number.get(token, -1) - 1
+            if idx >= 0:
+                return self.update_memory(idx, new_text)
+
+        # --- LLM with single-time memory injection ---
+        user_message = {'role': 'user', 'content': prompt}
+        self.history.append(user_message)
+        self._append_to_dialog_log("USER", prompt)
+
+        MAX_HISTORY = 16
+        inject_prompt = self.system_prompt.copy()
+
+        if self.history and self.history[0]['role'] == 'system':
+            inject_prompt['content'] = re.sub(r"\[MEMORY\](.*?)\[/MEMORY\]", "", inject_prompt['content'], flags=re.DOTALL)
+
+        cleaned_history = [inject_prompt] + self.history[-MAX_HISTORY:]
 
         try:
-            user_message = {'role': 'user', 'content': prompt}
-            self.history.append(user_message)
-            self._append_to_dialog_log("USER", prompt)
-
-            MAX_HISTORY = 16
-            cleaned_history = [self.system_prompt] + self.history[-MAX_HISTORY:]
-
             response = ollama.chat(model=self.model, messages=cleaned_history)
             assistant_message = response['message']
             assistant_text = assistant_message['content']
