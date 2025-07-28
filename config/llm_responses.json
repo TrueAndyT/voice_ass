@@ -1,0 +1,12 @@
+{
+  "search.none": "I looked around but couldn’t find anything matching that.",
+  "search.found_prefix": "Found {count} file{plural}.",
+  "memory.add": "Okay, I’ll keep that in mind.",
+  "memory.update": "Memory {index} updated.",
+  "memory.remove": "Memory {index} removed.",
+  "memory.missing": "I couldn’t find that memory to update or remove.",
+  "memory.empty": "I don’t have anything saved yet.",
+  "memory.list_prefix": "Here’s what I remember:",
+  "web.none": "Couldn’t find anything juicy.",
+  "web.summary_prefix": "You are Sandy — summarize the following web search results into a short, clever spoken response. Preserve your voice style: witty, brief, natural. Avoid long monologues. Highlight only key points or facts. Use casual tone, and never mention this is from a search."
+}

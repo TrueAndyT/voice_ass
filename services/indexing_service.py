@@ -6,7 +6,7 @@ from datetime import datetime
 
 class IndexingService:
     def __init__(self):
-        self.index_db_path = os.path.join("llm", "file_index.db")
+        self.index_db_path = os.path.join("config", "file_index.db")
         self._ensure_db()
 
     def _ensure_db(self):
@@ -24,7 +24,7 @@ class IndexingService:
         conn.commit()
         conn.close()
 
-    def _load_search_paths_from_config(self, config_path="llm/search_config.json"):
+    def _load_search_paths_from_config(self, config_path="config/search_config.json"):
         try:
             with open(config_path, "r") as f:
                 data = json.load(f)
@@ -59,12 +59,29 @@ class IndexingService:
                             content = self._extract_docx_text(full_path)
 
                         c.execute("INSERT INTO file_index (path, content) VALUES (?, ?)", (full_path, content))
+                        print(f"[OK] Indexed: {full_path}")
                     except Exception as e:
                         print(f"[WARN] Skipped {full_path}: {e}")
 
         conn.commit()
         conn.close()
         print("Indexing complete.")
+
+    def load_index(self):
+        conn = sqlite3.connect(self.index_db_path)
+        c = conn.cursor()
+        c.execute("SELECT path, content FROM file_index")
+        results = c.fetchall()
+        conn.close()
+        return results
+
+    def search(self, keyword):
+        conn = sqlite3.connect(self.index_db_path)
+        c = conn.cursor()
+        c.execute("SELECT path FROM file_index WHERE path LIKE ? OR content LIKE ?", (f"%{keyword}%", f"%{keyword}%"))
+        results = [row[0] for row in c.fetchall()]
+        conn.close()
+        return results
 
     def _extract_pdf_text(self, path):
         try:
@@ -83,11 +100,3 @@ class IndexingService:
         except Exception as e:
             print(f"[DOCX ERROR] {e}")
             return ""
-
-    def search(self, keyword):
-        conn = sqlite3.connect(self.index_db_path)
-        c = conn.cursor()
-        c.execute("SELECT path FROM file_index WHERE path LIKE ? OR content LIKE ?", (f"%{keyword}%", f"%{keyword}%"))
-        results = [row[0] for row in c.fetchall()]
-        conn.close()
-        return results
