@@ -13,8 +13,7 @@ def load_services():
     vad = webrtcvad.Vad(1)
 
     model_paths = [
-        os.path.join("models", "hey_jarvis_v0.1.onnx"),
-        os.path.join("models", "hey_mycroft_v0.1.onnx")
+        os.path.join("models", "alexa_v0.1.onnx")
     ]
 
     oww_model = Model(wakeword_model_paths=model_paths)
