@@ -30,14 +30,16 @@ def main():
 
         # Load all services
         log.info("--- Loading all services ---")
-        vad, oww_model, stt_service, llm_service, tts_service = load_services()
+        vad, oww_model, stt_service, llm_service, tts_service, kwd_service, interruption_ready, dialog_mode_flag = load_services()
         kwd_service = WakeWordService(oww_model, vad)
 
         # --- T1: App Start to Wakeword Ready ---
         wakeword_ready_time = time.time()
         log.info(f"--- Models loaded. Time to wakeword ready: {wakeword_ready_time - app_start_time:.2f} seconds ---")
         
-        tts_service.speak("Hi Master! Sandy at your services.")
+        tts_service.speak("Hi Master! Alexa at your services.")
+        interruption_ready.set()
+
 
     except Exception as e:
         log.error(f"Failed to load services: {e}", exc_info=True)
@@ -91,12 +93,19 @@ def main():
                         log.info(f"--- Time to LLM response: {llm_end_time - llm_start_time:.2f} seconds ---")
                         log.info(f"--- Time from speech end to TTS start: {tts_start_time - speech_end_time:.2f} seconds ---")
 
-                        while True:
+                        dialog_mode_flag.set()
+
+                        while dialog_mode_flag.is_set():
                             print("\nListening for follow-up...")
                             follow_up = stt_service.listen_and_transcribe(timeout_ms=4000)
                             speech_end_time = time.time()
-                            
+
                             if follow_up:
+                                if follow_up.strip().lower() in {"stop", "alexa stop"}:
+                                    print("🛑 Dialog manually ended.")
+                                    dialog_mode_flag.clear()
+                                    break
+
                                 print(f'🗣️  Transcription: "{follow_up}"')
                                 llm_start_time = time.time()
                                 llm_response = llm_service.get_response(follow_up)
@@ -110,7 +119,9 @@ def main():
                                 log.info(f"--- Time from speech end to TTS start: {tts_start_time - speech_end_time:.2f} seconds ---")
                             else:
                                 print("\nDialog ended due to inactivity.")
+                                dialog_mode_flag.clear()
                                 break
+
                     else:
                         log.info("STT service returned no transcription.")
                         print("No transcription was returned.")

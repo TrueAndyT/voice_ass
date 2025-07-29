@@ -51,7 +51,7 @@ class LLMService:
             with open("config/system_prompt.txt", "r") as f:
                 personality = f.read().strip()
         except:
-            personality = "You are Sandy — a helpful voice assistant."
+            personality = "You are Alexa — a helpful voice assistant."
 
         return memory_block + personality
 

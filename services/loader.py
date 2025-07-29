@@ -6,6 +6,9 @@ from openwakeword.model import Model
 from .stt_service import STTService
 from .llm_service import LLMService
 from .tts_service import TTSService
+from services.interruption_listener import InterruptionListener
+from threading import Event
+
 
 def load_services():
     print("Loading services...")
@@ -13,8 +16,7 @@ def load_services():
     vad = webrtcvad.Vad(1)
 
     model_paths = [
-        os.path.join("models", "hey_jarvis_v0.1.onnx"),
-        os.path.join("models", "hey_mycroft_v0.1.onnx")
+        os.path.join("models", "alexa_v0.1.onnx"),
     ]
 
     oww_model = Model(wakeword_model_paths=model_paths)
@@ -43,5 +45,10 @@ def load_services():
     llm_service.warmup_llm()
 
     print("✅ Models are loaded and ready.")
+
+    interruption_ready = Event()
+    dialog_mode_flag = Event()
+    listener = InterruptionListener(kwd_service, tts_service, interruption_ready, dialog_mode_flag)
+    listener.start()
     
-    return vad, oww_model, stt_service, llm_service, tts_service
+    return vad, oww_model, stt_service, llm_service, tts_service, kwd_service, interruption_ready, dialog_mode_flag
