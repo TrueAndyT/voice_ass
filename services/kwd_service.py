@@ -71,6 +71,19 @@ class KWDService:
                 
                 prediction = None
                 if len(self.utterance_buffer) >= self.OWW_CHUNK_SAMPLES:
+                    try:
+                        from datetime import datetime
+                        from scipy.io.wavfile import write as wav_write
+                        import os
+
+                        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+                        out_dir = "recordings/kwd_clips"
+                        os.makedirs(out_dir, exist_ok=True)
+                        fname = f"{out_dir}/{ts}_buffer.wav"
+                        wav_write(fname, self.RATE, self.utterance_buffer)
+                    except Exception as e:
+                        print(f"[WARN] Could not save KWD clip: {e}")
+
                     self.log.info("--> Sending complete utterance to wake word detector...")
                     prediction = self.oww_model.predict(self.utterance_buffer)
                     formatted_scores = {k.split('/')[-1]: f"{v:.2f}" for k, v in prediction.items()}
@@ -78,10 +91,8 @@ class KWDService:
                 else:
                     self.log.warning("Utterance too short to process, discarding.")
 
-                # Reset state and buffer AFTER processing is complete
                 self.current_state = self.State.WAITING_FOR_SPEECH
                 self.utterance_buffer = np.array([], dtype=np.int16)
-
                 self.dynamic_rms.reset()
 
                 if prediction:
