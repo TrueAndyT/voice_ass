@@ -6,6 +6,7 @@ from openwakeword.model import Model
 from .stt_service import STTService
 from .llm_service import LLMService
 from .tts_service import TTSService
+from .dynamic_rms_service import DynamicRMSService
 
 def load_services():
     print("Loading services...")
@@ -21,6 +22,8 @@ def load_services():
     stt_service = STTService()
     llm_service = LLMService(model='llama3.1:8b-instruct-q4_K_M')
     tts_service = TTSService()
+    dynamic_rms = DynamicRMSService()
+    dynamic_rms.start()
 
     print("Warming up models (this may take a moment)...")
 
@@ -43,4 +46,4 @@ def load_services():
 
     print("✅ Models are loaded and ready.")
     
-    return vad, oww_model, stt_service, llm_service, tts_service
+    return vad, oww_model, stt_service, llm_service, tts_service, dynamic_rms

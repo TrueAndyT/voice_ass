@@ -9,7 +9,8 @@ import subprocess
 from services.loader import load_services
 from services.kwd_service import KWDService
 from services.logger import setup_logging
-from services.memory_logger import MemoryLogger # <-- Import the new service
+from services.memory_logger import MemoryLogger
+from services.dynamic_rms_service import DynamicRMSService  # <-- Import the new service
 
 def main():
     # --- Performance Timers ---
@@ -30,8 +31,8 @@ def main():
 
         # Load all services
         log.info("--- Loading all services ---")
-        vad, oww_model, stt_service, llm_service, tts_service = load_services()
-        kwd_service = KWDService(oww_model, vad)
+        vad, oww_model, stt_service, llm_service, tts_service, dynamic_rms = load_services()
+        kwd_service = KWDService(oww_model, vad, dynamic_rms)
 
         # --- T1: App Start to KWD Ready ---
         kwd_ready_time = time.time()

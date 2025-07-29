@@ -5,8 +5,8 @@ import webrtcvad
 import numpy as np
 import os
 from datetime import datetime
-import logging # <-- Import logging
-from logging.handlers import TimedRotatingFileHandler # <-- Import the handler
+import logging
+from logging.handlers import TimedRotatingFileHandler
 
 # --- Configuration ---
 FORMAT = pyaudio.paInt16
@@ -15,12 +15,11 @@ RATE = 16000
 VAD_FRAME_MS = 30
 VAD_FRAME_SAMPLES = int(RATE * (VAD_FRAME_MS / 1000.0))
 MAX_INT16 = 32767.0
-RMS_THRESHOLD = 0.15 
 
 class STTService:
     """A service for transcribing speech using the Whisper ASR model."""
 
-    def __init__(self, model_size="small"):
+    def __init__(self, model_size="small", dynamic_rms=None):
         if torch.cuda.is_available():
             try:
                 _ = torch.cuda.get_device_name(0)
@@ -36,7 +35,7 @@ class STTService:
         self.vad = webrtcvad.Vad(3)
         self.allowed_languages = {'en', 'uk'}
 
-        # --- NEW: Set up the dedicated STT logger ---
+        self.dynamic_rms = dynamic_rms
         self.stt_logger = self._setup_stt_logger()
 
     def _setup_stt_logger(self):
@@ -46,21 +45,18 @@ class STTService:
         
         logger = logging.getLogger("STTLogger")
         logger.setLevel(logging.INFO)
-        logger.propagate = False # Prevent STT logs from appearing in the main app.log
+        logger.propagate = False
 
-        # Clear existing handlers to prevent duplicates
         if logger.hasHandlers():
             logger.handlers.clear()
 
-        # Create a handler that rotates the log file every 2 days
         handler = TimedRotatingFileHandler(
             os.path.join(log_dir, "stt.log"), 
-            when='D',       # 'D' for day
-            interval=2,     # Rotate every 2 days
-            backupCount=5   # Keep 5 old log files
+            when='D',
+            interval=2,
+            backupCount=5
         )
         
-        # Simple formatter: just the timestamp and the message
         formatter = logging.Formatter('%(asctime)s: %(message)s')
         handler.setFormatter(formatter)
         
@@ -69,7 +65,6 @@ class STTService:
 
     def _write_transcription_to_log(self, text):
         """Saves the transcription to the rotating log file."""
-        # --- MODIFIED: Use the logger instead of writing a new file ---
         self.stt_logger.info(text)
         print("Transcription logged.")
 
@@ -84,6 +79,7 @@ class STTService:
         
         recorded_frames = []
         silence_duration_ms = 0
+        threshold = self.dynamic_rms.get_threshold() if self.dynamic_rms else 0.15
 
         while True:
             audio_chunk = stream.read(VAD_FRAME_SAMPLES)
@@ -92,15 +88,17 @@ class STTService:
             chunk_np = np.frombuffer(audio_chunk, dtype=np.int16)
             normalized_chunk = chunk_np.astype(np.float32) / MAX_INT16
             rms = np.sqrt(np.mean(normalized_chunk**2))
-            is_speech = self.vad.is_speech(audio_chunk, sample_rate=RATE) and (rms > RMS_THRESHOLD)
+            is_speech = self.vad.is_speech(audio_chunk, sample_rate=RATE) and (rms > threshold)
 
-            if not is_speech:
+            if is_speech:
+                if self.dynamic_rms:
+                    self.dynamic_rms.lock()
+                silence_duration_ms = 0
+            else:
                 silence_duration_ms += VAD_FRAME_MS
                 if silence_duration_ms >= timeout_ms:
                     print("Silence detected, processing command...")
                     break
-            else:
-                silence_duration_ms = 0
 
         print("Transcription ended")
 
@@ -114,11 +112,13 @@ class STTService:
         
         if len(audio_np) < RATE * 0.5:
             print("Recording too short, skipping transcription.")
+            if self.dynamic_rms:
+                self.dynamic_rms.reset()
             return ""
 
         result = self.model.transcribe(
             audio_np, 
-            fp16=(self.device=="cuda"), 
+            fp16=(self.device == "cuda"), 
             no_speech_threshold=0.6
         )
         
@@ -127,13 +127,16 @@ class STTService:
             print(f"Detected language '{detected_language}' is not supported. Forcing transcription to English as a fallback.")
             result = self.model.transcribe(
                 audio_np, 
-                fp16=(self.device=="cuda"), 
+                fp16=(self.device == "cuda"), 
                 language='en',
                 no_speech_threshold=0.6
             )
 
         transcription = result['text'].strip()
         
+        if self.dynamic_rms:
+            self.dynamic_rms.reset()
+
         if transcription:
             self._write_transcription_to_log(transcription)
         

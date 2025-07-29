@@ -14,15 +14,15 @@ class KWDService:
     VAD_FRAME_MS = 30
     RATE = 16000
     MAX_INT16 = 32767.0
-    RMS_THRESHOLD = 0.15
     PRE_ROLL_BUFFER_DURATION = 0.4
     POST_ROLL_BUFFER_DURATION = 0.5
     OWW_CHUNK_SAMPLES = 1280
 
-    def __init__(self, oww_model, vad):
+    def __init__(self, oww_model, vad, dynamic_rms):
         self.log = logging.getLogger("KWD")
         self.oww_model = oww_model
         self.vad = vad
+        self.dynamic_rms = dynamic_rms
 
         # Initialize buffers and state
         pre_roll_frames = int((self.PRE_ROLL_BUFFER_DURATION * 1000) / self.VAD_FRAME_MS)
@@ -43,14 +43,16 @@ class KWDService:
         
         normalized_chunk = chunk_np.astype(np.float32) / self.MAX_INT16
         rms = np.sqrt(np.mean(normalized_chunk**2))
-        is_speech = self.vad.is_speech(audio_chunk_bytes, sample_rate=self.RATE) and (rms > self.RMS_THRESHOLD)
+        threshold = self.dynamic_rms.get_threshold()
+        is_speech = self.vad.is_speech(audio_chunk_bytes, sample_rate=self.RATE) and (rms > threshold)
 
         # State: WAITING_FOR_SPEECH
         if self.current_state == self.State.WAITING_FOR_SPEECH:
-            print(f"🎤 Waiting for speech... | RMS: {rms:.3f}", end='\r')
+            print(f"🎤 Waiting for speech... | RMS: {rms:.3f} | Threshold: {threshold:.3f}", end='\r')
             self.pre_roll_buffer.append(chunk_np)
             
             if is_speech:
+                self.dynamic_rms.lock()
                 self.log.info(f"Speech detected (RMS: {rms:.3f}). Starting to record utterance.")
                 self.utterance_buffer = np.concatenate(list(self.pre_roll_buffer))
                 self.utterance_buffer = np.concatenate((self.utterance_buffer, chunk_np))
@@ -59,7 +61,7 @@ class KWDService:
         
         # State: RECORDING_SPEECH
         elif self.current_state == self.State.RECORDING_SPEECH:
-            print(f"🔴 Recording utterance...  | RMS: {rms:.3f}", end='\r')
+            print(f"🔴 Recording utterance...  | RMS: {rms:.3f} | Threshold: {threshold:.3f}", end='\r')
             self.utterance_buffer = np.concatenate((self.utterance_buffer, chunk_np))
             self.silence_history.append(not is_speech)
 
@@ -79,8 +81,8 @@ class KWDService:
                 # Reset state and buffer AFTER processing is complete
                 self.current_state = self.State.WAITING_FOR_SPEECH
                 self.utterance_buffer = np.array([], dtype=np.int16)
-                
-                # The problematic reset() call has been removed from here.
+
+                self.dynamic_rms.reset()
 
                 if prediction:
                     return prediction, self.utterance_buffer
@@ -95,7 +97,7 @@ class KWDService:
                 self.current_state = self.State.WAITING_FOR_SPEECH
 
         return None, None
-    
+
     def enter_cooldown(self):
         """Forces the service into the cooldown state."""
         self.log.info(f"--- Cooldown started ---")
