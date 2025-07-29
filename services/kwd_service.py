@@ -3,7 +3,7 @@ import logging
 from collections import deque
 from enum import Enum
 
-class WakeWordService:
+class KWDService:
     # --- State Machine ---
     class State(Enum):
         WAITING_FOR_SPEECH = 1
@@ -20,7 +20,7 @@ class WakeWordService:
     OWW_CHUNK_SAMPLES = 1280
 
     def __init__(self, oww_model, vad):
-        self.log = logging.getLogger("wakeword")
+        self.log = logging.getLogger("KWD")
         self.oww_model = oww_model
         self.vad = vad
 
