@@ -48,7 +48,7 @@ class KWDService:
 
         # State: WAITING_FOR_SPEECH
         if self.current_state == self.State.WAITING_FOR_SPEECH:
-            print(f"🎤 Waiting for speech... | RMS: {rms:.3f} | Threshold: {threshold:.3f}", end='\r')
+            print(f"🎤 Waiting for speech... | RMS: {rms:.3f} | Threshold: {self.dynamic_rms.get_threshold():.3f}", end='\r')
             self.pre_roll_buffer.append(chunk_np)
             
             if is_speech:
@@ -61,7 +61,7 @@ class KWDService:
         
         # State: RECORDING_SPEECH
         elif self.current_state == self.State.RECORDING_SPEECH:
-            print(f"🔴 Recording utterance...  | RMS: {rms:.3f} | Threshold: {threshold:.3f}", end='\r')
+            print(f"🔴 Recording utterance...  | RMS: {rms:.3f} | Threshold: {self.dynamic_rms.get_threshold():.3f}", end='\r')
             self.utterance_buffer = np.concatenate((self.utterance_buffer, chunk_np))
             self.silence_history.append(not is_speech)
 

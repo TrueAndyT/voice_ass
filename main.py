@@ -69,6 +69,15 @@ def main():
 
                 if top_score >= WAKEWORD_THRESHOLD:
                     log.info(f"--- Actionable wake word detected: {top_wakeword} (Score: {top_score:.2f}) ---")
+                    try:
+                        subprocess.run([
+                            "paplay",
+                            "--volume=16384",
+                            "/usr/share/sounds/freedesktop/stereo/complete.oga"
+                        ], stderr=subprocess.DEVNULL)
+                    except Exception as e:
+                        log.warning(f"Wake word beep failed: {e}")
+
                     
                     stream.stop_stream()
 

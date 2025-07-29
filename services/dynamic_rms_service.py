@@ -8,7 +8,7 @@ class DynamicRMSService:
     def __init__(self, sample_rate=16000, frame_ms=30, window_seconds=3, multiplier=2.0):
         self.sample_rate = sample_rate
         self.frame_samples = int(sample_rate * frame_ms / 1000)
-        self.vad = webrtcvad.Vad(1)
+        self.vad = webrtcvad.Vad(3)
         self.multiplier = multiplier
         self.locked = False
         self.rms_values = []
@@ -49,7 +49,12 @@ class DynamicRMSService:
             chunk = stream.read(self.frame_samples, exception_on_overflow=False)
             audio_np = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32767.0
             rms = np.sqrt(np.mean(audio_np**2))
-            is_speech = self.vad.is_speech(chunk, sample_rate=self.sample_rate)
+
+            try:
+                is_speech = self.vad.is_speech(chunk, sample_rate=self.sample_rate)
+            except Exception as e:
+                print(f"[ERROR] VAD failure in RMS thread: {e}")
+                is_speech = False  # fallback
 
             with self._lock:
                 if not self.locked and not is_speech:
@@ -59,7 +64,9 @@ class DynamicRMSService:
                     if self.rms_values:
                         self.threshold = np.mean(self.rms_values) * self.multiplier
 
-            time.sleep(1.0)
+            print(f"[DYN RMS] rms={rms:.3f} | speech={is_speech} | locked={self.locked} | threshold={self.threshold:.3f}", end='\r')
+            time.sleep(0.1)
+
 
         stream.stop_stream()
         stream.close()
