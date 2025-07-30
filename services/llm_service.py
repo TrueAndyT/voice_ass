@@ -21,6 +21,7 @@ class LLMService:
         self.log.info(f"Initializing LLM service with model: {model}")
         
         self.model = model
+        self._check_gpu_availability()
         self.dialog_log_file = None
 
         self.text = LLMText()
@@ -41,6 +42,26 @@ class LLMService:
             "web_search": WebSearchHandler(self.web, self.model, self.system_prompt, self.text),
             "note": NoteHandler(),  # NoteHandler takes a path, not LLMText object
         }
+
+    def _check_gpu_availability(self):
+        """Check if Ollama is using GPU acceleration and log the details."""
+        try:
+            # Check if CUDA is available on the system
+            import subprocess
+            try:
+                result = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'], 
+                                       capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    gpu_info = result.stdout.strip().split(', ')
+                    gpu_name = gpu_info[0] if len(gpu_info) > 0 else "Unknown GPU"
+                    gpu_memory = gpu_info[1] if len(gpu_info) > 1 else "Unknown Memory"
+                    self.log.info(f"LLM (Ollama) running on GPU: {gpu_name} ({gpu_memory})")
+                else:
+                    self.log.warning("LLM (Ollama) GPU status unknown - nvidia-smi failed")
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                self.log.warning("LLM (Ollama) running on CPU - NVIDIA GPU not detected")
+        except Exception as e:
+            self.log.warning(f"Could not determine LLM GPU status: {e}")
 
     def _build_system_prompt(self):
         """Build the system prompt with memory and personality."""

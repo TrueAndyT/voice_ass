@@ -23,12 +23,27 @@ class TTSService:
 
     def __init__(self, voice_model='af_heart'):
         self.log = app_logger.get_logger("tts_service")
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.log.info(f"Initializing TTS service using device: {self.device}")
+        self.device = self._get_device()
         self.voice_model = voice_model
         self.sample_rate = 24000
         self.pipeline = self._build_pipeline()
         self._stream = None
+
+    def _get_device(self):
+        """Determine the compute device (CUDA or CPU) for TTS."""
+        if torch.cuda.is_available():
+            try:
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # GB
+                self.log.info(f"TTS (Kokoro) running on GPU: {gpu_name} ({gpu_memory:.1f}GB)")
+                return "cuda"
+            except Exception as e:
+                self.log.warning(f"CUDA is available but failed to initialize: {e}")
+                self.log.warning("TTS (Kokoro) falling back to CPU")
+                return "cpu"
+        else:
+            self.log.warning("TTS (Kokoro) running on CPU - GPU acceleration not available")
+            return "cpu"
 
     def _build_pipeline(self):
         # Suppress the repo_id warning by explicitly passing it

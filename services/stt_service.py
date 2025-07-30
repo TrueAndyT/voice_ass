@@ -39,15 +39,16 @@ class STTService:
         """Determine the compute device (CUDA or CPU)."""
         if torch.cuda.is_available():
             try:
-                torch.cuda.get_device_name(0)
-                self.log.info("CUDA is available, using GPU for STT")
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # GB
+                self.log.info(f"STT (Whisper) running on GPU: {gpu_name} ({gpu_memory:.1f}GB)")
                 return "cuda"
             except Exception as e:
                 self.log.warning(f"CUDA is available but failed to initialize: {e}")
-                self.log.warning("Falling back to CPU for STT")
+                self.log.warning("STT (Whisper) falling back to CPU")
                 return "cpu"
         else:
-            self.log.info("CUDA not available, using CPU for STT")
+            self.log.warning("STT (Whisper) running on CPU - GPU acceleration not available")
             return "cpu"
 
     def _load_model(self, model_size):
