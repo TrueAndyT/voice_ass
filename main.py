@@ -1,8 +1,21 @@
 # Suppress common warnings at the very beginning
 import warnings
+import os
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
+# Suppress ALSA and JACK audio warnings for cleaner output
+os.environ['ALSA_PCM_CARD'] = 'default'
+os.environ['ALSA_PCM_DEVICE'] = '0'
+# Redirect JACK server error messages to /dev/null
+original_stderr = os.dup(2)
+os.close(2)
+os.open(os.devnull, os.O_RDWR)
+
 import pyaudio
+
+# Restore stderr after PyAudio import
+os.dup2(original_stderr, 2)
+os.close(original_stderr)
 import sys
 import logging
 from datetime import datetime
