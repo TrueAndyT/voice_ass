@@ -1,6 +1,12 @@
 import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
+# Suppress specific warnings
+import warnings
+warnings.filterwarnings("ignore", message="dropout option adds dropout after all but last recurrent layer")
+warnings.filterwarnings("ignore", message=".*weight_norm.* is deprecated")
+warnings.filterwarnings("ignore", message="FutureWarning")
+
 import torch
 from kokoro import KPipeline
 import sounddevice as sd
@@ -9,25 +15,29 @@ import threading
 import queue
 import time
 import re
+from .logger import app_logger
+from .exceptions import TTSException
 
 class TTSService:
     """TTS using Kokoro with pre-buffered chunk streaming and seamless playback."""
 
     def __init__(self, voice_model='af_heart'):
+        self.log = app_logger.get_logger("tts_service")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Kokoro TTS using device: {self.device}")
+        self.log.info(f"Initializing TTS service using device: {self.device}")
         self.voice_model = voice_model
         self.sample_rate = 24000
         self.pipeline = self._build_pipeline()
         self._stream = None
 
     def _build_pipeline(self):
-        return KPipeline(lang_code='a', device=self.device)
+        # Suppress the repo_id warning by explicitly passing it
+        return KPipeline(lang_code='a', device=self.device, repo_id='hexgrad/Kokoro-82M')
 
 
     def speak(self, text):
-        print(f"TTS saying: '{text}'")
-
+        self.log.debug(f"Speaking: '{text}'")
+        
         chunks = self._segment_text(text)
         chunk_queue = queue.Queue()
 
@@ -50,7 +60,7 @@ class TTSService:
                 full_audio = np.concatenate(audio_frames)
                 out_queue.put(full_audio)
             except Exception as e:
-                print(f"[TTS] Generator error: {e}")
+                self.log.error(f"TTS generator error: {e}")
                 out_queue.put(None)
 
         try:
@@ -70,13 +80,13 @@ class TTSService:
 
         except Exception as e:
             if "cuFFT" in str(e) or "CUDA" in str(e):
-                print("[🔥 cuFFT or CUDA crash] Attempting TTS pipeline recovery...")
+                self.log.warning("cuFFT or CUDA crash detected, attempting TTS pipeline recovery...")
                 try:
                     self.pipeline = self._build_pipeline()
-                    print("[✅] TTS pipeline recovered.")
+                    self.log.info("TTS pipeline recovered successfully")
                 except Exception as rebuild_error:
-                    print(f"[❌] Failed to rebuild pipeline: {rebuild_error}")
-            print(f"[TTS] Playback error: {e}")
+                    self.log.error(f"Failed to rebuild TTS pipeline: {rebuild_error}")
+            self.log.error(f"TTS playback error: {e}")
         finally:
             if self._stream:
                 self._stream.stop()
@@ -101,11 +111,12 @@ class TTSService:
         return chunks
 
     def warmup(self):
-        print("Warming up Kokoro TTS...")
+        self.log.debug("Warming up TTS pipeline...")
         try:
             generator = self.pipeline(" ", voice=self.voice_model)
             for _ in generator:
                 pass
-            print("Kokoro TTS is ready.")
+            self.log.info("TTS pipeline warmed up successfully")
         except Exception as e:
-            print(f"Error during TTS warmup: {e}")
+            self.log.error(f"TTS warmup failed: {e}")
+            raise TTSException(f"TTS warmup failed: {e}")

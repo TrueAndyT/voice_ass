@@ -20,9 +20,14 @@ class WebSearchService:
         }
 
         try:
+            print(f"[DEBUG] Query: {query}")
+            print(f"[DEBUG] Payload: {payload}")
+
             response = requests.post(self.api_url, json=payload, timeout=5)
             response.raise_for_status()
             data = response.json()
+            print(f"[DEBUG] Response: {response.status_code} {response.text}")
+
 
             results = []
             for r in data.get("results", []):

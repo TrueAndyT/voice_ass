@@ -5,12 +5,14 @@ import time
 import os
 import psutil
 from datetime import datetime
+from .logger import app_logger
 from services.dashboard import DASHBOARD  # ← added
 
 class MemoryLogger:
     TARGET_PROCESSES = ["python", "ollama", "openwakeword"]
 
     def __init__(self, log_file=os.path.join('logs', 'memory.csv'), interval=1):
+        self.log = app_logger.get_logger("memory_logger")
         self.log_file = log_file
         self.interval = interval
         self._stop_event = threading.Event()
@@ -96,10 +98,10 @@ class MemoryLogger:
                 time.sleep(self.interval)
 
     def start(self):
-        print("--- VRAM logger started ---")
+        self.log.info("VRAM and system monitoring started")
         self._thread.start()
 
     def stop(self):
         self._stop_event.set()
         self._thread.join()
-        print("--- VRAM logger stopped ---")
+        self.log.info("VRAM and system monitoring stopped")
