@@ -1,12 +1,14 @@
 import numpy as np
 import logging
 from collections import deque
+import time
 
 class KWDService:
     # --- Configuration ---
     RATE = 16000
     MAX_INT16 = 32767.0
     OWW_EXPECTED_SAMPLES = 16000  # openwakeword expects 1 second of audio
+    COOLDOWN_SECONDS = 2.0  # Cooldown period after detection
 
     def __init__(self, oww_model, vad, dynamic_rms):
         self.log = logging.getLogger("KWD")
@@ -18,6 +20,10 @@ class KWDService:
         self.audio_buffer = deque(maxlen=self.OWW_EXPECTED_SAMPLES)
         # Initialize with silence
         self.audio_buffer.extend(np.zeros(self.OWW_EXPECTED_SAMPLES, dtype=np.int16))
+        
+        # Cooldown tracking
+        self.last_detection_time = 0
+        self.in_cooldown = False
 
     def process_audio(self, audio_chunk_bytes):
         """
@@ -29,6 +35,15 @@ class KWDService:
         
         # Add new audio to the right of the buffer, pushing out old audio from the left
         self.audio_buffer.extend(chunk_np)
+        
+        # Check if we're in cooldown period
+        current_time = time.time()
+        if self.in_cooldown:
+            if current_time - self.last_detection_time < self.COOLDOWN_SECONDS:
+                return None, None
+            else:
+                self.in_cooldown = False
+                self.log.debug("Cooldown period ended")
         
         # Get the current 1-second window for prediction
         prediction_buffer = np.array(self.audio_buffer, dtype=np.int16)
@@ -53,6 +68,8 @@ class KWDService:
             # Check if any score is above a certain threshold, e.g., 0.5
             if any(score > 0.5 for score in prediction.values()):
                 self.log.info(f"Wake word detected! Scores: {prediction}")
+                # Enter cooldown period
+                self.enter_cooldown()
                 # Return the full buffer that contains the wake word
                 return prediction, prediction_buffer
 
@@ -62,5 +79,7 @@ class KWDService:
         return None, None
 
     def enter_cooldown(self):
-        """Placeholder for cooldown logic if needed in the future."""
-        self.log.info("Cooldown would be activated here.")
+        """Enter cooldown period to prevent multiple detections from one utterance."""
+        self.in_cooldown = True
+        self.last_detection_time = time.time()
+        self.log.debug(f"Entering cooldown for {self.COOLDOWN_SECONDS} seconds")

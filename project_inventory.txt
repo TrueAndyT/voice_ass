@@ -1,0 +1,83 @@
+# Project Python Files Inventory
+Generated on: Wed Jul 30 10:45:03 PM EEST 2025
+
+## Summary
+- Root files: 4
+- Service files: 24 (20 services + 4 handlers)
+- Test files: 12
+- Total Python files: 40
+
+## Root Directory Python Files (4)
+1. main.py - Main application entry point
+2. manage_logs.py - Log management utility
+3. test_logging.py - Logging test script
+4. test_tts.py - TTS test script
+
+## Services Directory Python Files (20)
+### Core Services
+1. services/__init__.py
+2. services/dashboard.py
+3. services/dynamic_rms_service.py - ✅ TESTED (stub)
+4. services/exceptions.py
+5. services/intent_detector.py - ✅ TESTED (stub)
+6. services/kwd_service.py - ✅ FULLY TESTED WITH REAL INTEGRATION
+7. services/loader.py
+8. services/logger.py - ✅ TESTED (stub)
+9. services/memory_logger.py
+10. services/microservices_loader.py
+11. services/service_manager.py - ✅ TESTED (stub)
+12. services/web_search_service.py
+
+### LLM Services
+13. services/llama_file_search_service.py
+14. services/llama_indexing_service.py
+15. services/llm_client.py
+16. services/llm_service.py - ✅ TESTED (stub)
+17. services/llm_service_server.py - ✅ TESTED (stub)
+18. services/llm_text.py
+
+### STT/TTS Services
+19. services/stt_client.py
+20. services/stt_service.py - ✅ TESTED (stub)
+21. services/stt_service_server.py - ✅ TESTED (stub)
+22. services/tts_client.py
+23. services/tts_service.py - ✅ TESTED (stub)
+24. services/tts_service_server.py - ✅ TESTED (stub)
+
+## Services/Handlers Directory Python Files (4)
+1. services/handlers/file_search_handler.py
+2. services/handlers/memory_handler.py
+3. services/handlers/note_handler.py
+4. services/handlers/web_search_handler.py
+
+## Tests Directory Python Files (12)
+1. tests/__init__.py
+2. tests/dynamic_rms_service_test.py - For: dynamic_rms_service.py
+3. tests/intent_detector_test.py - For: intent_detector.py
+4. tests/kwd_service_test.py - For: kwd_service.py ✅ COMPLETE
+5. tests/llm_service_server_test.py - For: llm_service_server.py
+6. tests/llm_service_test.py - For: llm_service.py
+7. tests/logger_test.py - For: logger.py
+8. tests/service_manager_test.py - For: service_manager.py
+9. tests/stt_service_server_test.py - For: stt_service_server.py
+10. tests/stt_service_test.py - For: stt_service.py
+11. tests/tts_service_server_test.py - For: tts_service_server.py
+12. tests/tts_service_test.py - For: tts_service.py
+
+## Services Without Tests (12)
+- dashboard.py
+- exceptions.py
+- llama_file_search_service.py
+- llama_indexing_service.py
+- llm_client.py
+- llm_text.py
+- loader.py
+- memory_logger.py
+- microservices_loader.py
+- web_search_service.py
+- All 4 handler files
+
+## Quick Reference
+- ✅ Fully tested: kwd_service.py
+- ✅ Test stubs exist: 11 services
+- ❌ No tests: 12 services

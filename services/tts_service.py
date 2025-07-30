@@ -60,9 +60,8 @@ class TTSService:
 
         def generate_audio(chunk, out_queue):
             try:
-                # Ensure the input chunk is a tensor on the correct device
-                chunk_tensor = torch.tensor(self.pipeline.tokenizer.encode(chunk), device=self.device).unsqueeze(0)
-                generator = self.pipeline(chunk_tensor, voice=self.voice_model)
+                # Use the pipeline directly with text input
+                generator = self.pipeline(chunk, voice=self.voice_model)
                 audio_frames = []
                 for _, _, audio in generator:
                     if isinstance(audio, torch.Tensor):
@@ -139,3 +138,11 @@ class TTSService:
         except Exception as e:
             self.log.error(f"TTS warmup failed: {e}")
             raise TTSException(f"TTS warmup failed: {e}")
+
+    def stop(self):
+        """Immediately stop audio playback"""
+        if self._stream:
+            self._stream.stop()
+            self._stream.close()
+            self._stream = None
+            self.log.info("TTS playback stopped")
