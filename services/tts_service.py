@@ -24,6 +24,7 @@ class TTSService:
     def _build_pipeline(self):
         return KPipeline(lang_code='a', device=self.device)
 
+
     def speak(self, text):
         print(f"TTS saying: '{text}'")
 

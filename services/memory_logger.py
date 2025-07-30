@@ -1,9 +1,11 @@
+# services/memory_logger.py
 import subprocess
 import threading
 import time
 import os
 import psutil
 from datetime import datetime
+from services.dashboard import DASHBOARD  # ← added
 
 class MemoryLogger:
     TARGET_PROCESSES = ["python", "ollama", "openwakeword"]
@@ -22,7 +24,6 @@ class MemoryLogger:
             os.remove(self.log_file)
 
     def _get_gpu_vram_by_name(self, name):
-        """Returns total GPU memory used by processes with a given name using nvidia-smi pmon."""
         try:
             result = subprocess.run(
                 "nvidia-smi pmon -c 1",
@@ -35,7 +36,6 @@ class MemoryLogger:
             return 0
 
     def _get_total_gpu(self):
-        """Returns (total used, total memory) from nvidia-smi."""
         try:
             result = subprocess.run(
                 ['nvidia-smi', '--query-gpu=memory.used,memory.total', '--format=csv,noheader,nounits'],
@@ -47,7 +47,6 @@ class MemoryLogger:
             return 0, 0
 
     def _get_process_stats(self):
-        """Returns RAM and CPU usage for target processes."""
         stats = {name: {"ram": 0, "cpu": 0} for name in self.TARGET_PROCESSES}
         for proc in psutil.process_iter(['name', 'memory_info', 'cpu_percent']):
             try:
@@ -79,6 +78,20 @@ class MemoryLogger:
                         f"{proc_stats['python']['ram']}, {proc_stats['ollama']['ram']}, {proc_stats['openwakeword']['ram']}, "
                         f"{proc_stats['python']['cpu']:.1f}, {proc_stats['ollama']['cpu']:.1f}, {proc_stats['openwakeword']['cpu']:.1f}\n")
                 f.flush()
+
+                # ─ Update dashboard ─
+                try:
+                    gpu_pct = int((gpu_used / gpu_total) * 100) if gpu_total > 0 else 0
+                    DASHBOARD.update_vram(gpu_used, gpu_pct)
+
+                    total_cpu = (
+                        proc_stats['python']['cpu']
+                        + proc_stats['ollama']['cpu']
+                        + proc_stats['openwakeword']['cpu']
+                    )
+                    DASHBOARD.update_cpu(total_cpu)
+                except Exception:
+                    pass
 
                 time.sleep(self.interval)
 

@@ -40,6 +40,7 @@ def main():
         
         tts_service.speak("Hi Master! Alexa at your services.")
 
+
     except Exception as e:
         log.error(f"Failed to load services: {e}", exc_info=True)
         print(f"[ERROR] Failed to load services: {e}")
