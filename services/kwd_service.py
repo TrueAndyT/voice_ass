@@ -1,116 +1,66 @@
 import numpy as np
 import logging
 from collections import deque
-from enum import Enum
 
 class KWDService:
-    # --- State Machine ---
-    class State(Enum):
-        WAITING_FOR_SPEECH = 1
-        RECORDING_SPEECH = 2
-        COOLDOWN = 3
-
     # --- Configuration ---
-    VAD_FRAME_MS = 30
     RATE = 16000
     MAX_INT16 = 32767.0
-    PRE_ROLL_BUFFER_DURATION = 0.4
-    POST_ROLL_BUFFER_DURATION = 0.5
-    OWW_CHUNK_SAMPLES = 1280
+    OWW_EXPECTED_SAMPLES = 16000  # openwakeword expects 1 second of audio
 
     def __init__(self, oww_model, vad, dynamic_rms):
         self.log = logging.getLogger("KWD")
         self.oww_model = oww_model
         self.vad = vad
         self.dynamic_rms = dynamic_rms
-
-        # Initialize buffers and state
-        pre_roll_frames = int((self.PRE_ROLL_BUFFER_DURATION * 1000) / self.VAD_FRAME_MS)
-        self.pre_roll_buffer = deque(maxlen=pre_roll_frames)
         
-        post_roll_frames = int((self.POST_ROLL_BUFFER_DURATION * 1000) / self.VAD_FRAME_MS)
-        self.silence_history = deque(maxlen=post_roll_frames)
-
-        self.utterance_buffer = np.array([], dtype=np.int16)
-        self.current_state = self.State.WAITING_FOR_SPEECH
+        # Buffer to hold exactly 1 second of audio data for openwakeword
+        self.audio_buffer = deque(maxlen=self.OWW_EXPECTED_SAMPLES)
+        # Initialize with silence
+        self.audio_buffer.extend(np.zeros(self.OWW_EXPECTED_SAMPLES, dtype=np.int16))
 
     def process_audio(self, audio_chunk_bytes):
         """
-        Processes a single chunk of audio, updates the state machine,
-        and returns a detection result if a complete utterance is processed.
+        Continuously processes audio chunks, feeding them into a sliding 
+        1-second buffer for wake word detection.
         """
+        # Convert raw bytes to numpy array
         chunk_np = np.frombuffer(audio_chunk_bytes, dtype=np.int16)
         
-        normalized_chunk = chunk_np.astype(np.float32) / self.MAX_INT16
-        rms = np.sqrt(np.mean(normalized_chunk**2))
-        threshold = self.dynamic_rms.get_threshold()
-        is_speech = self.vad.is_speech(audio_chunk_bytes, sample_rate=self.RATE) and (rms > threshold)
-
-        # State: WAITING_FOR_SPEECH
-        if self.current_state == self.State.WAITING_FOR_SPEECH:
-            print(f"🎤 Waiting for speech... | RMS: {rms:.3f} | Threshold: {self.dynamic_rms.get_threshold():.3f}", end='\r')
-            self.pre_roll_buffer.append(chunk_np)
-            
-            if is_speech:
-                self.dynamic_rms.lock()
-                self.log.info(f"Speech detected (RMS: {rms:.3f}). Starting to record utterance.")
-                self.utterance_buffer = np.concatenate(list(self.pre_roll_buffer))
-                self.utterance_buffer = np.concatenate((self.utterance_buffer, chunk_np))
-                self.silence_history.clear()
-                self.current_state = self.State.RECORDING_SPEECH
+        # Add new audio to the right of the buffer, pushing out old audio from the left
+        self.audio_buffer.extend(chunk_np)
         
-        # State: RECORDING_SPEECH
-        elif self.current_state == self.State.RECORDING_SPEECH:
-            print(f"🔴 Recording utterance...  | RMS: {rms:.3f} | Threshold: {self.dynamic_rms.get_threshold():.3f}", end='\r')
-            self.utterance_buffer = np.concatenate((self.utterance_buffer, chunk_np))
-            self.silence_history.append(not is_speech)
+        # Get the current 1-second window for prediction
+        prediction_buffer = np.array(self.audio_buffer, dtype=np.int16)
 
-            if len(self.silence_history) == self.silence_history.maxlen and all(self.silence_history):
-                print(" " * 50, end='\r')
-                self.log.info(f"Speech ended. Utterance length: {len(self.utterance_buffer)/self.RATE:.2f}s.")
-                
-                prediction = None
-                if len(self.utterance_buffer) >= self.OWW_CHUNK_SAMPLES:
-                    try:
-                        from datetime import datetime
-                        from scipy.io.wavfile import write as wav_write
-                        import os
+        # Ensure the buffer is exactly the size OWW expects
+        if len(prediction_buffer) != self.OWW_EXPECTED_SAMPLES:
+            self.log.warning(
+                f"Prediction buffer size is {len(prediction_buffer)}, expected "
+                f"{self.OWW_EXPECTED_SAMPLES}. Skipping prediction."
+            )
+            return None, None
 
-                        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-                        out_dir = "recordings/kwd_clips"
-                        os.makedirs(out_dir, exist_ok=True)
-                        fname = f"{out_dir}/{ts}_buffer.wav"
-                        wav_write(fname, self.RATE, self.utterance_buffer)
-                    except Exception as e:
-                        print(f"[WARN] Could not save KWD clip: {e}")
+        try:
+            # Send the 1-second buffer to the wake word model
+            prediction = self.oww_model.predict(prediction_buffer)
+            
+            # You can add logic here to check if a wake word was detected
+            # For now, we'll just log the scores
+            # formatted_scores = {k.split('/')[-1]: f"{v:.2f}" for k, v in prediction.items()}
+            # self.log.debug(f"Prediction scores: {formatted_scores}")
+            
+            # Check if any score is above a certain threshold, e.g., 0.5
+            if any(score > 0.5 for score in prediction.values()):
+                self.log.info(f"Wake word detected! Scores: {prediction}")
+                # Return the full buffer that contains the wake word
+                return prediction, prediction_buffer
 
-                    self.log.info("--> Sending complete utterance to wake word detector...")
-                    prediction = self.oww_model.predict(self.utterance_buffer)
-                    formatted_scores = {k.split('/')[-1]: f"{v:.2f}" for k, v in prediction.items()}
-                    self.log.info(f"<-- Prediction results: {formatted_scores}")
-                else:
-                    self.log.warning("Utterance too short to process, discarding.")
-
-                self.current_state = self.State.WAITING_FOR_SPEECH
-                self.utterance_buffer = np.array([], dtype=np.int16)
-                self.dynamic_rms.reset()
-
-                if prediction:
-                    return prediction, self.utterance_buffer
-
-        # State: COOLDOWN
-        elif self.current_state == self.State.COOLDOWN:
-            print("🤫 Cooldown active...", end='\r')
-            self.silence_history.append(not is_speech)
-            if len(self.silence_history) == self.silence_history.maxlen and all(self.silence_history):
-                self.log.info("--- Cooldown finished. KWD is on. ---")
-                print(f"\n▶️  --- KWD is on ---")
-                self.current_state = self.State.WAITING_FOR_SPEECH
-
+        except Exception as e:
+            self.log.error(f"Wake word prediction failed: {e}")
+        
         return None, None
 
     def enter_cooldown(self):
-        """Forces the service into the cooldown state."""
-        self.log.info(f"--- Cooldown started ---")
-        self.silence_history.clear()
-        self.current_state = self.State.COOLDOWN
+        """Placeholder for cooldown logic if needed in the future."""
+        self.log.info("Cooldown would be activated here.")

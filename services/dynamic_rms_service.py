@@ -21,8 +21,8 @@ class DynamicRMSService:
         if self.running:
             return
         self.running = True
-        self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self.thread.start()
+        # Background thread disabled to prevent PyAudio conflicts
+        # The main application will call update_threshold() directly
 
     def stop(self):
         self.running = False
@@ -39,23 +39,19 @@ class DynamicRMSService:
     def get_threshold(self):
         with self._lock:
             return self.threshold
-
-    def _monitor_loop(self):
-        pa = pyaudio.PyAudio()
-        stream = pa.open(format=pyaudio.paInt16, channels=1, rate=self.sample_rate, input=True,
-                         frames_per_buffer=self.frame_samples)
-
-        while self.running:
-            chunk = stream.read(self.frame_samples, exception_on_overflow=False)
-            audio_np = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32767.0
+    
+    def update_threshold(self, audio_chunk):
+        """Manually update threshold based on audio chunk from main application."""
+        try:
+            audio_np = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32) / 32767.0
             rms = np.sqrt(np.mean(audio_np**2))
-
+            
             try:
-                is_speech = self.vad.is_speech(chunk, sample_rate=self.sample_rate)
+                is_speech = self.vad.is_speech(audio_chunk, sample_rate=self.sample_rate)
             except Exception as e:
-                print(f"[ERROR] VAD failure in RMS thread: {e}")
+                print(f"[ERROR] VAD failure in RMS update: {e}")
                 is_speech = False  # fallback
-
+            
             with self._lock:
                 if not self.locked and not is_speech:
                     self.rms_values.append(rms)
@@ -63,11 +59,11 @@ class DynamicRMSService:
                         self.rms_values.pop(0)
                     if self.rms_values:
                         self.threshold = np.mean(self.rms_values) * self.multiplier
+        except Exception as e:
+            print(f"[ERROR] Failed to update RMS threshold: {e}")
 
-            print(f"[DYN RMS] rms={rms:.3f} | speech={is_speech} | locked={self.locked} | threshold={self.threshold:.3f}", end='\r')
-            time.sleep(0.1)
-
-
-        stream.stop_stream()
-        stream.close()
-        pa.terminate()
+    def _monitor_loop(self):
+        # Disabled independent audio monitoring to prevent PyAudio conflicts
+        # The main application will handle audio processing and call update_threshold() directly
+        while self.running:
+            time.sleep(0.1)  # Keep thread alive but don't do audio processing

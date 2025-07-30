@@ -3,8 +3,9 @@ import warnings
 import os
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
-# Note: ALSA/JACK error suppression was removed due to segmentation faults
-# The warnings will be visible but the application will be stable
+# Suppress ALSA/JACK warnings safely
+os.environ['ALSA_SUPPRESS_ERRORS'] = '1'
+os.environ['JACK_NO_START_SERVER'] = '1'
 
 import pyaudio
 import sys
@@ -37,41 +38,56 @@ def play_beep(sound_type="ready", log=None):
         try:
             # Use local project WAV files
             base_path = os.path.join(os.path.dirname(__file__), "config", "sounds")
-            if sound_type == "ready":
-                sound_file = os.path.join(base_path, "ready.wav")
-            else:  # sound_type == "end"
-                sound_file = os.path.join(base_path, "end.wav")
+            
+            # Map sound types to files
+            sound_files = {
+                "ready": "ready.wav",
+                "kwd_ready": "kwd_ready.wav", 
+                "end": "end.wav"
+            }
+            
+            sound_filename = sound_files.get(sound_type, "kwd_ready.wav")
+            sound_file = os.path.join(base_path, sound_filename)
+            
+            if log:
+                log.info(f"Playing {sound_type} sound: {sound_file}")
             
             # Check if file exists
             if not os.path.exists(sound_file):
                 if log:
-                    log.debug(f"Sound file not found: {sound_file}")
+                    log.warning(f"Sound file not found: {sound_file}")
                 raise FileNotFoundError(f"Sound file not found: {sound_file}")
             
-            # Try multiple audio methods
+            # Try multiple audio methods with better error handling and maximum volume
             audio_methods = [
-                f"paplay {sound_file}",
-                f"aplay -q {sound_file}"
+                f"paplay --volume=65536 '{sound_file}'",  # Max volume for paplay
+                f"aplay -q '{sound_file}'",
+                f"ffplay -nodisp -autoexit -volume 100 '{sound_file}' 2>/dev/null"
             ]
             
             for method in audio_methods:
                 try:
-                    result = subprocess.run(method, shell=True, timeout=2, 
+                    if log:
+                        log.debug(f"Trying audio method: {method}")
+                    result = subprocess.run(method, shell=True, timeout=3, 
                                           capture_output=True, text=True)
                     if result.returncode == 0:
                         if log:
-                            log.debug(f"Successfully played sound with: {method}")
+                            log.info(f"Successfully played sound with: {method.split()[0]}")
                         return
+                    else:
+                        if log:
+                            log.debug(f"Method failed with return code {result.returncode}: {result.stderr}")
                 except subprocess.TimeoutExpired:
                     if log:
                         log.debug(f"Audio method timed out: {method}")
                 except Exception as e:
                     if log:
-                        log.debug(f"Audio method failed {method}: {e}")
+                        log.debug(f"Audio method exception {method}: {e}")
             
             # If all audio methods failed
             if log:
-                log.debug("All audio methods failed, falling back to system beep")
+                log.warning("All audio methods failed, falling back to system beep")
             raise Exception("All audio methods failed")
             
         except Exception as e:
@@ -98,19 +114,39 @@ def play_beep(sound_type="ready", log=None):
     threading.Thread(target=_beep, daemon=True).start()
 
 @contextmanager
+def suppress_stderr():
+    """Temporarily suppress stderr to hide ALSA/JACK warnings."""
+    # Save the original stderr file descriptor
+    stderr_fd = sys.stderr.fileno()
+    old_stderr_fd = os.dup(stderr_fd)
+    
+    try:
+        # Redirect stderr to /dev/null
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull_fd, stderr_fd)
+        os.close(devnull_fd)
+        yield
+    finally:
+        # Restore original stderr
+        os.dup2(old_stderr_fd, stderr_fd)
+        os.close(old_stderr_fd)
+
+@contextmanager
 def audio_stream_manager(format_type, channels, rate, frames_per_buffer):
     """Context manager for PyAudio stream with proper cleanup."""
     pa = None
     stream = None
     try:
-        pa = pyaudio.PyAudio()
-        stream = pa.open(
-            format=format_type, 
-            channels=channels, 
-            rate=rate, 
-            input=True, 
-            frames_per_buffer=frames_per_buffer
-        )
+        # Suppress ALSA/JACK warnings during PyAudio initialization
+        with suppress_stderr():
+            pa = pyaudio.PyAudio()
+            stream = pa.open(
+                format=format_type, 
+                channels=channels, 
+                rate=rate, 
+                input=True, 
+                frames_per_buffer=frames_per_buffer
+            )
         yield stream
     except Exception as e:
         raise MicrophoneException(
@@ -122,7 +158,8 @@ def audio_stream_manager(format_type, channels, rate, frames_per_buffer):
             stream.stop_stream()
             stream.close()
         if pa:
-            pa.terminate()
+            with suppress_stderr():
+                pa.terminate()
 
 
 def record_audio_for_transcription(stream, timeout_ms=3000, log=None):
@@ -367,7 +404,7 @@ def main():
             
             # Play beep to indicate KWD is ready for wake word detection
             log.info("Wake word detection is now active - listening for 'Alexa'")
-            play_beep(sound_type="ready", log=log)
+            play_beep(sound_type="kwd_ready", log=log)
             
             while True:
                 try:

@@ -83,7 +83,7 @@ def load_services_microservices():
             raise ServiceInitializationException("TTS", "TTS microservice failed to become ready")
         services["tts_service"] = tts_service
         
-        # STT Client  
+        # STT Client
         stt_service = STTClient(port=8002, dynamic_rms=dynamic_rms)
         for attempt in range(30):
             if stt_service.health_check():

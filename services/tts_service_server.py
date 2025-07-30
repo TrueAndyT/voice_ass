@@ -9,11 +9,29 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
+# Suppress ALSA, JACK, and PulseAudio warnings in microservice
+os.environ['ALSA_PCM_CARD'] = 'default'
+os.environ['ALSA_PCM_DEVICE'] = '0'
+os.environ['PULSE_RUNTIME_PATH'] = '/dev/null'  # Suppress PulseAudio warnings
+# Redirect stderr and stdout temporarily to suppress audio warnings
+original_stderr = os.dup(2)
+original_stdout = os.dup(1)
+os.close(2)
+os.close(1)
+os.open(os.devnull, os.O_RDWR)
+os.open(os.devnull, os.O_RDWR)
+
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 from services.tts_service import TTSService
 from services.logger import app_logger
+
+# Restore stderr and stdout after imports
+os.dup2(original_stderr, 2)
+os.dup2(original_stdout, 1)
+os.close(original_stderr)
+os.close(original_stdout)
 
 # Initialize FastAPI app
 app = FastAPI()
