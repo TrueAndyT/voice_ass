@@ -21,13 +21,24 @@ def test_microservices():
         
         log.info("✅ All services loaded successfully!")
         
-        # Test TTS microservice
-        log.info("Testing TTS microservice...")
+        # Test STT microservice
+        log.info("Testing STT microservice...")
         try:
-            tts_service.speak("Hello, this is a test of the TTS microservice!")
-            log.info("✅ TTS microservice test passed!")
+            # Create a dummy audio file for testing
+            import numpy as np
+            dummy_audio = np.random.randint(-32768, 32767, 16000, dtype=np.int16)
+            transcription = stt_service._send_for_transcription(dummy_audio.tobytes())
+            log.info(f"✅ STT microservice transcription: {transcription}")
         except Exception as e:
-            log.error(f"❌ TTS microservice test failed: {e}")
+            log.error(f"❌ STT microservice test failed: {e}")
+
+        # Test LLM microservice
+        log.info("Testing LLM microservice...")
+        try:
+            response = llm_service.get_response("Hello, who are you?")
+            log.info(f"✅ LLM microservice response: {response}")
+        except Exception as e:
+            log.error(f"❌ LLM microservice test failed: {e}")
         
         # Keep running for a few seconds to observe
         log.info("Keeping services running for 10 seconds...")

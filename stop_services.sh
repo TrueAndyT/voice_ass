@@ -28,8 +28,8 @@ stop_service() {
 
 # Stop all services
 stop_service "tts_service"
-# stop_service "stt_service"
-# stop_service "llm_service"
+stop_service "stt_service"
+stop_service "llm_service"
 
 # Also kill any remaining uvicorn processes
 echo "Cleaning up any remaining uvicorn processes..."

@@ -22,12 +22,10 @@ start_service() {
     echo "$pid" > "/tmp/${service_name}.pid"
 }
 
-# Start TTS microservice
+# Start all microservices
 start_service "tts_service" "services.tts_service_server:app" 8001
-
-# Add other services here as they are converted...
-# start_service "stt_service" "services.stt_service_server:app" 8002
-# start_service "llm_service" "services.llm_service_server:app" 8003
+start_service "stt_service" "services.stt_service_server:app" 8002
+start_service "llm_service" "services.llm_service_server:app" 8003
 
 echo "✅ All microservices started!"
 echo "📊 Check service status with: ps aux | grep uvicorn"

@@ -221,3 +221,45 @@ class STTService:
                 f"Whisper model failed to transcribe audio: {e}",
                 context={"audio_length_s": len(audio_np) / RATE}
             )
+    
+    def transcribe_audio_bytes(self, audio_bytes):
+        """Transcribe audio from raw bytes (for microservice API)."""
+        try:
+            # Convert bytes to numpy array
+            audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / MAX_INT16
+            
+            if len(audio_np) < RATE * 0.5:  # 0.5s minimum
+                self.log.warning("Audio too short for transcription")
+                return ""
+            
+            # Transcribe using Whisper
+            result = self.model.transcribe(
+                audio_np,
+                fp16=(self.device == "cuda"),
+                no_speech_threshold=0.6
+            )
+            
+            detected_language = result.get('language')
+            if detected_language not in self.allowed_languages:
+                self.log.warning(
+                    f"Detected language '{detected_language}' not supported, using English fallback"
+                )
+                result = self.model.transcribe(
+                    audio_np,
+                    fp16=(self.device == "cuda"),
+                    language='en',
+                    no_speech_threshold=0.6
+                )
+            
+            transcription = result['text'].strip()
+            
+            if transcription:
+                self._write_transcription_to_log(transcription)
+            
+            return transcription
+            
+        except Exception as e:
+            raise STTException(
+                f"Failed to transcribe audio bytes: {e}",
+                context={"audio_bytes_length": len(audio_bytes)}
+            )

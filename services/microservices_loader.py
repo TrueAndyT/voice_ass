@@ -5,8 +5,8 @@ import os
 import time
 import requests
 from openwakeword.model import Model
-from .stt_service import STTService
-from .llm_service import LLMService
+from .stt_client import STTClient
+from .llm_client import LLMClient
 from .tts_client import TTSClient
 from .dynamic_rms_service import DynamicRMSService
 from .service_manager import ServiceManager
@@ -42,49 +42,25 @@ def load_services_microservices():
         oww_model = Model(wakeword_model_paths=model_paths)
         services["oww_model"] = oww_model
         
-        # Start TTS microservice
-        log.info("Starting TTS microservice...")
-        tts_process = service_manager.start_service(
-            "tts_service",
-            "python3 -m uvicorn services.tts_service_server:app --host 0.0.0.0 --port 8001",
-            port=8001
-        )
+        # Start all microservices
+        microservices = [
+            ("tts_service", "services.tts_service_server:app", 8001),
+            ("stt_service", "services.stt_service_server:app", 8002),
+            ("llm_service", "services.llm_service_server:app", 8003)
+        ]
         
-        if not tts_process:
-            raise ServiceInitializationException("TTS", "Failed to start TTS microservice")
+        for service_name, app_path, port in microservices:
+            log.info(f"Starting {service_name} microservice...")
+            process = service_manager.start_service(
+                service_name,
+                f"python3 -m uvicorn {app_path} --host 0.0.0.0 --port {port}",
+                port=port
+            )
+            
+            if not process:
+                raise ServiceInitializationException(service_name, f"Failed to start {service_name} microservice")
         
-        # Wait for TTS service to be ready
-        log.info("Waiting for TTS service to initialize...")
-        tts_service = TTSClient(port=8001)
-        
-        # Wait up to 30 seconds for service to be ready
-        for attempt in range(30):
-            if tts_service.health_check():
-                log.info("TTS microservice is ready")
-                break
-            time.sleep(1)
-        else:
-            raise ServiceInitializationException("TTS", "TTS microservice failed to become ready")
-        
-        services["tts_service"] = tts_service
-        
-        # Initialize remaining services locally (for now)
-        # TODO: Convert these to microservices as well
-        
-        try:
-            log.info("Initializing Speech-to-Text service...")
-            stt_service = STTService()
-            services["stt_service"] = stt_service
-        except Exception as e:
-            raise ServiceInitializationException("STT", str(e))
-        
-        try:
-            log.info("Initializing Language Model service...")
-            llm_service = LLMService(model='llama3.1:8b-instruct-q4_K_M')
-            services["llm_service"] = llm_service
-        except Exception as e:
-            raise ServiceInitializationException("LLM", str(e))
-        
+        # Initialize Dynamic RMS service (runs locally)
         try:
             log.info("Initializing Dynamic RMS service...")
             dynamic_rms = DynamicRMSService()
@@ -92,6 +68,42 @@ def load_services_microservices():
             services["dynamic_rms"] = dynamic_rms
         except Exception as e:
             raise ServiceInitializationException("DynamicRMS", str(e))
+        
+        # Create clients for microservices and wait for them to be ready
+        log.info("Initializing microservice clients...")
+        
+        # TTS Client
+        tts_service = TTSClient(port=8001)
+        for attempt in range(30):
+            if tts_service.health_check():
+                log.info("TTS microservice is ready")
+                break
+            time.sleep(1)
+        else:
+            raise ServiceInitializationException("TTS", "TTS microservice failed to become ready")
+        services["tts_service"] = tts_service
+        
+        # STT Client  
+        stt_service = STTClient(port=8002, dynamic_rms=dynamic_rms)
+        for attempt in range(30):
+            if stt_service.health_check():
+                log.info("STT microservice is ready")
+                break
+            time.sleep(1)
+        else:
+            raise ServiceInitializationException("STT", "STT microservice failed to become ready")
+        services["stt_service"] = stt_service
+        
+        # LLM Client
+        llm_service = LLMClient(port=8003)
+        for attempt in range(30):
+            if llm_service.health_check():
+                log.info("LLM microservice is ready")
+                break
+            time.sleep(1)
+        else:
+            raise ServiceInitializationException("LLM", "LLM microservice failed to become ready")
+        services["llm_service"] = llm_service
         
         # Warm up models
         log.info("Warming up models for optimal performance...")
@@ -112,7 +124,7 @@ def _warmup_models_microservices(oww_model, stt_service, tts_service, llm_servic
     """Warm up all models with detailed timing and error handling."""
     warmup_times = {}
     
-    # Warm up OpenWakeWord
+    # Warm up OpenWakeWord (runs locally)
     try:
         log.debug("Warming up OpenWakeWord model...")
         start_time = time.time()
@@ -124,19 +136,6 @@ def _warmup_models_microservices(oww_model, stt_service, tts_service, llm_servic
     except Exception as e:
         log.warning(f"OpenWakeWord warmup failed: {e}")
     
-    # Warm up Whisper STT
-    try:
-        log.debug(f"Warming up Whisper STT model (device: {stt_service.device})...")
-        start_time = time.time()
-        if stt_service.device == 'cuda':
-            rate = 16000
-            silent_whisper_chunk = np.zeros(rate, dtype=np.float32)
-            stt_service.model.transcribe(silent_whisper_chunk, fp16=True)
-        warmup_times["stt"] = time.time() - start_time
-        log.debug(f"Whisper STT warmup completed in {warmup_times['stt']:.2f}s")
-    except Exception as e:
-        log.warning(f"Whisper STT warmup failed: {e}")
-    
     # Warm up TTS microservice
     try:
         log.debug("Warming up TTS microservice...")
@@ -147,15 +146,18 @@ def _warmup_models_microservices(oww_model, stt_service, tts_service, llm_servic
     except Exception as e:
         log.warning(f"TTS microservice warmup failed: {e}")
     
-    # Warm up LLM
+    # Warm up LLM microservice
     try:
-        log.debug("Warming up Language Model...")
+        log.debug("Warming up LLM microservice...")
         start_time = time.time()
         llm_service.warmup_llm()
         warmup_times["llm"] = time.time() - start_time
-        log.debug(f"LLM warmup completed in {warmup_times['llm']:.2f}s")
+        log.debug(f"LLM microservice warmup completed in {warmup_times['llm']:.2f}s")
     except Exception as e:
-        log.warning(f"LLM warmup failed: {e}")
+        log.warning(f"LLM microservice warmup failed: {e}")
+    
+    # Note: STT microservice warmup happens during service initialization
+    # No additional warmup needed for STT client
     
     # Log performance metrics
     total_warmup_time = sum(warmup_times.values())
