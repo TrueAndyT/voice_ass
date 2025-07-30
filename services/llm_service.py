@@ -113,6 +113,49 @@ class LLMService:
         except IOError as e:
             self.log.error(f"Failed to append to dialog log: {e}")
 
+    def _extract_ollama_metrics(self, response):
+        """Extract performance metrics from Ollama response."""
+        metrics = {}
+        
+        try:
+            # Use .get() for safe dictionary access
+            total_duration = response.get('total_duration', 0)
+            load_duration = response.get('load_duration', 0)
+            prompt_eval_duration = response.get('prompt_eval_duration', 0)
+            eval_duration = response.get('eval_duration', 0)
+            prompt_eval_count = response.get('prompt_eval_count', 0)
+            eval_count = response.get('eval_count', 0)
+
+            if total_duration > 0:
+                metrics['total_duration'] = f"{total_duration / 1_000_000_000:.2f}s"
+            
+            if load_duration > 0:
+                metrics['load_duration'] = f"{load_duration / 1_000_000_000:.3f}s"
+            
+            if prompt_eval_duration > 0:
+                prompt_eval_time = prompt_eval_duration / 1_000_000_000
+                metrics['prompt_eval_duration'] = f"{prompt_eval_time:.3f}s"
+                metrics['time_to_first_token'] = f"{prompt_eval_time:.3f}s"
+
+            if eval_duration > 0:
+                metrics['eval_duration'] = f"{eval_duration / 1_000_000_000:.2f}s"
+                if eval_count > 0:
+                    tokens_per_sec = eval_count / (eval_duration / 1_000_000_000)
+                    metrics['tokens_per_second'] = f"{tokens_per_sec:.1f}"
+
+            if prompt_eval_count > 0:
+                metrics['prompt_tokens'] = prompt_eval_count
+            
+            if eval_count > 0:
+                metrics['completion_tokens'] = eval_count
+            
+            self.log.debug(f"Extracted Ollama metrics: {metrics}")
+            
+        except Exception as e:
+            self.log.warning(f"Failed to extract Ollama metrics: {e}")
+        
+        return metrics
+
     def warmup_llm(self):
         """Warm up the LLM to reduce initial response time."""
         try:
@@ -143,7 +186,8 @@ class LLMService:
                     f"intent_{intent}", duration, {"input_length": len(prompt)}
                 )
                 self._append_to_dialog_log("ASSISTANT", reply)
-                return reply if intent != "file_search" else ""
+                # Return tuple for consistency (reply, metrics)
+                return reply, {}
 
             # Default: general LLM chat
             self.history.append({'role': 'user', 'content': prompt})
@@ -151,7 +195,10 @@ class LLMService:
             reply = response['message']['content']
             self.history.append({'role': 'assistant', 'content': reply})
             self._append_to_dialog_log("ASSISTANT", reply)
-            return reply
+            
+            # Extract Ollama's native metrics
+            metrics = self._extract_ollama_metrics(response)
+            return reply, metrics
             
         except ollama.ResponseError as e:
             error_message = f"Ollama API error: {e.error}"
@@ -159,9 +206,9 @@ class LLMService:
                 "props": {"status_code": e.status_code}
             })
             self._append_to_dialog_log("ASSISTANT_ERROR", error_message)
-            return "I'm sorry, I'm having trouble connecting to my brain right now."
+            return "I'm sorry, I'm having trouble connecting to my brain right now.", {}
         except Exception as e:
             error_message = f"Unexpected error in LLM service: {e}"
             self.log.critical(error_message, exc_info=True)
             self._append_to_dialog_log("ASSISTANT_ERROR", error_message)
-            raise LLMException(error_message) from e
+            return f"Error: {error_message}", {}

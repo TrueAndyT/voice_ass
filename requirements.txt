@@ -23,6 +23,10 @@ kokoro
 # Logging and Utility
 requests
 
+# Dashboard and Monitoring
+rich
+psutil
+
 # Vector Search and Embeddings
 llama-index
 faiss-cpu

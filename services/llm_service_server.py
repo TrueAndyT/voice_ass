@@ -53,8 +53,16 @@ async def chat(request: ChatRequest):
     if not llm_service:
         return {"error": "LLM service not initialized"}, 503
     try:
-        response = llm_service.get_response(request.prompt)
-        return {"response": response}
+        result = llm_service.get_response(request.prompt)
+        
+        # Handle both tuple and single return values
+        if isinstance(result, tuple):
+            response, metrics = result
+        else:
+            response = result
+            metrics = {}
+        
+        return {"response": response, "metrics": metrics}
     except Exception as e:
         log.error(f"Error during LLM chat request: {e}", exc_info=True)
         return {"error": str(e)}, 500

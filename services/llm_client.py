@@ -8,6 +8,7 @@ import requests
 import time
 from .logger import app_logger
 from .exceptions import LLMException
+from .intent_detector import IntentDetector
 
 class LLMClient:
     """HTTP client for LLM microservice that mimics the original LLM service interface."""
@@ -16,6 +17,7 @@ class LLMClient:
         self.log = app_logger.get_logger("llm_client")
         self.base_url = f"http://{host}:{port}"
         self.timeout = timeout
+        self.intent_detector = IntentDetector()  # Add intent detector
         self.log.info(f"LLM client initialized for {self.base_url}")
     
     def get_response(self, prompt):
@@ -32,7 +34,15 @@ class LLMClient:
                 duration = time.time() - start_time
                 self.log.debug(f"LLM chat request completed in {duration:.2f}s")
                 result = response.json()
-                return result.get("response", "")
+                
+                # Extract response and metrics
+                llm_response = result.get("response", "")
+                metrics = result.get("metrics", {})
+                
+                self.log.debug(f"LLM Client received metrics: {metrics}")
+                
+                # Return tuple (response, metrics) for consistency with LLMService
+                return llm_response, metrics
             else:
                 error_msg = f"LLM chat request failed: {response.status_code} - {response.text}"
                 self.log.error(error_msg)

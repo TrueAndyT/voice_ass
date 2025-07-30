@@ -6,7 +6,7 @@ import os
 import psutil
 from datetime import datetime
 from .logger import app_logger
-from services.dashboard import DASHBOARD  # ← added
+# Dashboard integration removed - using new DashboardService
 
 class MemoryLogger:
     TARGET_PROCESSES = ["python", "ollama", "openwakeword"]
@@ -81,19 +81,7 @@ class MemoryLogger:
                         f"{proc_stats['python']['cpu']:.1f}, {proc_stats['ollama']['cpu']:.1f}, {proc_stats['openwakeword']['cpu']:.1f}\n")
                 f.flush()
 
-                # ─ Update dashboard ─
-                try:
-                    gpu_pct = int((gpu_used / gpu_total) * 100) if gpu_total > 0 else 0
-                    DASHBOARD.update_vram(gpu_used, gpu_pct)
-
-                    total_cpu = (
-                        proc_stats['python']['cpu']
-                        + proc_stats['ollama']['cpu']
-                        + proc_stats['openwakeword']['cpu']
-                    )
-                    DASHBOARD.update_cpu(total_cpu)
-                except Exception:
-                    pass
+                # Dashboard integration handled by main dashboard service
 
                 time.sleep(self.interval)
 
