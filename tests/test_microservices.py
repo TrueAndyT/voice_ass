@@ -5,6 +5,11 @@ Test script to verify the microservices architecture works correctly.
 
 import time
 import sys
+import os
+
+# Add parent directory to path so we can import services
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from services.microservices_loader import load_services_microservices
 from services.logger import app_logger
 

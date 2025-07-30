@@ -5,6 +5,12 @@ Test script to verify the enhanced logging system works correctly.
 
 import time
 import traceback
+import sys
+import os
+
+# Add parent directory to path so we can import services
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from services.logger import app_logger
 from services.exceptions import VoiceAssistantException, STTException
 
