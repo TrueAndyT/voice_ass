@@ -33,31 +33,21 @@ from services.exceptions import (
     VoiceAssistantException
 )
 
-def play_beep(sound_type="ready", log=None):
-    """Play a short, pleasant system sound to indicate system readiness."""
+def play_beep(log=None):
+    """Play the wake word detection sound."""
     def _beep():
         try:
-            # Use local project WAV files
-            base_path = os.path.join(os.path.dirname(__file__), "config", "sounds")
-            
-            # Map sound types to files
-            sound_files = {
-                "ready": "ready.wav",
-                "kwd_ready": "kwd_ready.wav", 
-                "end": "end.wav"
-            }
-            
-            sound_filename = sound_files.get(sound_type, "kwd_ready.wav")
-            sound_file = os.path.join(base_path, sound_filename)
+            # Path to the wake word success sound
+            sound_file = os.path.join(os.path.dirname(__file__), "config", "sounds", "kwd_success.wav")
             
             if log:
-                log.info(f"Playing {sound_type} sound: {sound_file}")
+                log.debug(f"Playing wake word detection sound: {sound_file}")
             
             # Check if file exists
             if not os.path.exists(sound_file):
                 if log:
                     log.warning(f"Sound file not found: {sound_file}")
-                raise FileNotFoundError(f"Sound file not found: {sound_file}")
+                return  # Just return, don't play anything if file is missing
             
             # Try multiple audio methods with better error handling and maximum volume
             audio_methods = [
@@ -74,7 +64,7 @@ def play_beep(sound_type="ready", log=None):
                                           capture_output=True, text=True)
                     if result.returncode == 0:
                         if log:
-                            log.info(f"Successfully played sound with: {method.split()[0]}")
+                            log.debug(f"Successfully played sound with: {method.split()[0]}")
                         return
                     else:
                         if log:
@@ -86,30 +76,12 @@ def play_beep(sound_type="ready", log=None):
                     if log:
                         log.debug(f"Audio method exception {method}: {e}")
             
-            # If all audio methods failed
             if log:
-                log.warning("All audio methods failed, falling back to system beep")
-            raise Exception("All audio methods failed")
+                log.debug("All audio methods failed")
             
         except Exception as e:
             if log:
-                log.debug(f"Could not play system sound: {e}")
-            # Fallback to system beep methods
-            beep_methods = [
-                "printf '\a'",
-                "echo -e '\a'"
-            ]
-            
-            for method in beep_methods:
-                try:
-                    subprocess.run(method, shell=True, timeout=1)
-                    if log:
-                        log.debug(f"System beep with: {method}")
-                    break
-                except Exception as e2:
-                    if log:
-                        log.debug(f"Beep method failed {method}: {e2}")
-                    continue
+                log.debug(f"Could not play wake word sound: {e}")
     
     # Run beep in a separate thread to avoid blocking
     threading.Thread(target=_beep, daemon=True).start()
@@ -318,7 +290,6 @@ def handle_wake_word_interaction(stt_service, llm_service, tts_service, log, das
         # Handle follow-up conversation
         handle_followup_conversation(stt_service, llm_service, tts_service, log, dashboard)
         
-        # Play beep to indicate ready for next wake word
         log.info("Conversation ended - listening for wake word again")
         if dashboard:
             dashboard.update_state("Listening")
@@ -428,7 +399,7 @@ def main():
     CONFIG["vad_frame_samples"] = int(CONFIG["rate"] * (CONFIG["vad_frame_ms"] / 1000.0))
     
     try:
-        log.info("Voice Assistant starting up...")
+        log.info("Starting Alexa - Local voice assistant")
         
         # Start memory logging (temporarily disabled to test segfault)
         # mem_logger = MemoryLogger()
@@ -482,11 +453,6 @@ def main():
             CONFIG["vad_frame_samples"]
         ) as stream:
             
-            log.info("Main application loop started")
-            
-            # Play beep to indicate KWD is ready for wake word detection
-            log.info("Wake word detection is now active - listening for 'Alexa'")
-            play_beep(sound_type="kwd_ready", log=log)
             
             while True:
                 try:

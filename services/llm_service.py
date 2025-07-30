@@ -191,7 +191,14 @@ class LLMService:
 
             # Default: general LLM chat
             self.history.append({'role': 'user', 'content': prompt})
-            response = ollama.chat(model=self.model, messages=self.history[-16:])
+            
+            # Ensure system prompt is always first in the messages sent to Ollama
+            messages_to_send = self.history[-16:]
+            if messages_to_send[0]['role'] != 'system':
+                # Always include system prompt at the start
+                messages_to_send = [self.system_prompt] + messages_to_send
+            
+            response = ollama.chat(model=self.model, messages=messages_to_send)
             reply = response['message']['content']
             self.history.append({'role': 'assistant', 'content': reply})
             self._append_to_dialog_log("ASSISTANT", reply)

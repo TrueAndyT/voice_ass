@@ -20,15 +20,15 @@ def load_services_microservices():
     services = {}
     
     try:
-        log.info("Starting microservices-based voice assistant...")
+        log.debug("Starting microservices-based voice assistant...")
         
         # Initialize VAD (runs locally for low latency)
-        log.info("Initializing Voice Activity Detection...")
+        log.info("Initializing VAD...")
         vad = webrtcvad.Vad(1)
         services["vad"] = vad
         
         # Load wake word model (runs locally for low latency)
-        log.info("Loading wake word detection model...")
+        log.info("Loading KWD model...")
         model_paths = [os.path.join("models", "alexa_v0.1.onnx")]
         
         # Verify model files exist
@@ -50,7 +50,7 @@ def load_services_microservices():
         ]
         
         for service_name, app_path, port in microservices:
-            log.info(f"Starting {service_name} microservice...")
+            log.debug(f"Starting {service_name} microservice...")
             process = service_manager.start_service(
                 service_name,
                 f"python3 -m uvicorn {app_path} --host 0.0.0.0 --port {port}",
@@ -62,7 +62,7 @@ def load_services_microservices():
         
         # Initialize Dynamic RMS service (runs locally)
         try:
-            log.info("Initializing Dynamic RMS service...")
+            log.debug("Initializing Dynamic RMS service...")
             dynamic_rms = DynamicRMSService()
             dynamic_rms.start()
             services["dynamic_rms"] = dynamic_rms
@@ -70,13 +70,13 @@ def load_services_microservices():
             raise ServiceInitializationException("DynamicRMS", str(e))
         
         # Create clients for microservices and wait for them to be ready
-        log.info("Initializing microservice clients...")
+        log.debug("Initializing microservice clients...")
         
         # TTS Client
         tts_service = TTSClient(port=8001)
         for attempt in range(30):
             if tts_service.health_check():
-                log.info("TTS microservice is ready")
+                log.debug("TTS microservice is ready")
                 break
             time.sleep(1)
         else:
@@ -87,7 +87,7 @@ def load_services_microservices():
         stt_service = STTClient(port=8002, dynamic_rms=dynamic_rms)
         for attempt in range(30):
             if stt_service.health_check():
-                log.info("STT microservice is ready")
+                log.debug("STT microservice is ready")
                 break
             time.sleep(1)
         else:
@@ -98,7 +98,7 @@ def load_services_microservices():
         llm_service = LLMClient(port=8003)
         for attempt in range(30):
             if llm_service.health_check():
-                log.info("LLM microservice is ready")
+                log.debug("LLM microservice is ready")
                 break
             time.sleep(1)
         else:
@@ -106,7 +106,7 @@ def load_services_microservices():
         services["llm_service"] = llm_service
         
         # Warm up models
-        log.info("Warming up models for optimal performance...")
+        log.debug("Warming up models for optimal performance...")
         _warmup_models_microservices(oww_model, stt_service, tts_service, llm_service, log)
         
         log.info("All services loaded and warmed up successfully")
@@ -167,7 +167,7 @@ def _warmup_models_microservices(oww_model, stt_service, tts_service, llm_servic
         warmup_times
     )
     
-    log.info(f"Model warmup completed in {total_warmup_time:.2f} seconds")
+    log.debug(f"Model warmup completed in {total_warmup_time:.2f} seconds")
 
 def _cleanup_services(services):
     """Clean up partially initialized services."""

@@ -62,7 +62,7 @@ class LLMClient:
             )
             
             if response.status_code == 200:
-                self.log.info("LLM service warmed up successfully")
+                self.log.debug("LLM service warmed up successfully")
                 return response.json()
             else:
                 error_msg = f"LLM warmup request failed: {response.status_code} - {response.text}"

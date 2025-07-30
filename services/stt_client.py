@@ -18,7 +18,7 @@ class STTClient:
         self.base_url = f"http://{host}:{port}"
         self.timeout = timeout
         self.dynamic_rms = dynamic_rms
-        self.log.info(f"STT client initialized for {self.base_url}")
+        self.log.debug(f"STT client initialized for {self.base_url}")
     
     def listen_and_transcribe(self, timeout_ms=3000):
         """Deprecated: This method creates audio conflicts. Use transcribe_audio_bytes instead."""

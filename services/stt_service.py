@@ -191,24 +191,13 @@ class STTService:
             return ""
 
         try:
+            # Force English transcription only
             result = self.model.transcribe(
                 audio_np, 
                 fp16=(self.device == "cuda"), 
+                language='en',  # Force English language
                 no_speech_threshold=0.6
             )
-            
-            detected_language = result.get('language')
-            if detected_language not in self.allowed_languages:
-                self.log.warning(
-                    f"Detected language '{detected_language}' is not supported. "
-                    f"Forcing transcription to English as a fallback."
-                )
-                result = self.model.transcribe(
-                    audio_np, 
-                    fp16=(self.device == "cuda"), 
-                    language='en',
-                    no_speech_threshold=0.6
-                )
 
             transcription = result['text'].strip()
             
@@ -233,24 +222,13 @@ class STTService:
                 self.log.warning("Audio too short for transcription")
                 return ""
             
-            # Transcribe using Whisper
+            # Force English transcription only
             result = self.model.transcribe(
                 audio_np,
                 fp16=(self.device == "cuda"),
+                language='en',  # Force English language
                 no_speech_threshold=0.6
             )
-            
-            detected_language = result.get('language')
-            if detected_language not in self.allowed_languages:
-                self.log.warning(
-                    f"Detected language '{detected_language}' not supported, using English fallback"
-                )
-                result = self.model.transcribe(
-                    audio_np,
-                    fp16=(self.device == "cuda"),
-                    language='en',
-                    no_speech_threshold=0.6
-                )
             
             transcription = result['text'].strip()
             

@@ -17,7 +17,7 @@ class ServiceManager:
 
     def start_service(self, name, command, host="127.0.0.1", port=8000):
         """Start a microservice as a subprocess."""
-        self.log.info(f"Starting service: {name} on {host}:{port}")
+        self.log.debug(f"Starting service: {name} on {host}:{port}")
         try:
             # Get the project root directory (parent of services directory)
             import os
@@ -39,7 +39,7 @@ class ServiceManager:
                 "port": port,
                 "command": command
             })
-            self.log.info(f"Service '{name}' started with PID: {process.pid}")
+            self.log.debug(f"Service '{name}' started with PID: {process.pid}")
             return process
         except Exception as e:
             self.log.error(f"Failed to start service '{name}': {e}", exc_info=True)
@@ -49,21 +49,21 @@ class ServiceManager:
         """Stop a specific microservice by name."""
         for service in self.services:
             if service["name"] == name:
-                self.log.info(f"Stopping service: {name} (PID: {service['process'].pid})")
+                self.log.debug(f"Stopping service: {name} (PID: {service['process'].pid})")
                 service['process'].terminate()
                 service['process'].wait()
-                self.log.info(f"Service '{name}' stopped")
+                self.log.debug(f"Service '{name}' stopped")
                 self.services.remove(service)
                 break
 
     def stop_all_services(self):
         """Stop all running microservices."""
-        self.log.info("Stopping all services...")
+        self.log.debug("Stopping all services...")
         for service in self.services:
-            self.log.info(f"Stopping service: {service['name']} (PID: {service['process'].pid})")
+            self.log.debug(f"Stopping service: {service['name']} (PID: {service['process'].pid})")
             service['process'].terminate()
             service['process'].wait()
-        self.log.info("All services stopped")
+        self.log.debug("All services stopped")
 
     def check_service_health(self, name):
         """Check if a service is running and responsive."""

@@ -16,7 +16,7 @@ class TTSClient:
         self.log = app_logger.get_logger("tts_client")
         self.base_url = f"http://{host}:{port}"
         self.timeout = timeout
-        self.log.info(f"TTS client initialized for {self.base_url}")
+        self.log.debug(f"TTS client initialized for {self.base_url}")
     
     def speak(self, text):
         """Send text to TTS microservice for speech synthesis."""
@@ -51,7 +51,7 @@ class TTSClient:
             )
             
             if response.status_code == 200:
-                self.log.info("TTS service warmed up successfully")
+                self.log.debug("TTS service warmed up successfully")
                 return response.json()
             else:
                 error_msg = f"TTS warmup request failed: {response.status_code} - {response.text}"

@@ -16,7 +16,6 @@ class FileSearchHandler:
 
         if not all_found:
             reply = self.text.get("search.none")
-            self.tts.speak("No matches found.")
             return reply
 
         count = len(all_found)
@@ -33,10 +32,9 @@ class FileSearchHandler:
         if count == 1:
             subprocess.run(["xdg-open", all_found[0]], check=False)
 
+        # Return what should be spoken
         if count <= 3:
-            to_say = spoken + " " + ". ".join(Path(f).stem for f in all_found)
+            spoken_details = spoken + " " + ". ".join(Path(f).stem for f in all_found)
+            return spoken_details
         else:
-            to_say = spoken
-        self.tts.speak(to_say)
-
-        return reply
+            return reply
