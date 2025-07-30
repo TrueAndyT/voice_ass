@@ -46,8 +46,10 @@ class TTSService:
             return "cpu"
 
     def _build_pipeline(self):
-        # Suppress the repo_id warning by explicitly passing it
-        return KPipeline(lang_code='a', device=self.device, repo_id='hexgrad/Kokoro-82M')
+        # Load the model and move it to the correct device
+        pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M')
+        pipeline.model.to(self.device)
+        return pipeline
 
 
     def speak(self, text):
@@ -58,7 +60,9 @@ class TTSService:
 
         def generate_audio(chunk, out_queue):
             try:
-                generator = self.pipeline(chunk, voice=self.voice_model)
+                # Ensure the input chunk is a tensor on the correct device
+                chunk_tensor = torch.tensor(self.pipeline.tokenizer.encode(chunk), device=self.device).unsqueeze(0)
+                generator = self.pipeline(chunk_tensor, voice=self.voice_model)
                 audio_frames = []
                 for _, _, audio in generator:
                     if isinstance(audio, torch.Tensor):

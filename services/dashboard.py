@@ -8,40 +8,21 @@ import psutil
 import time
 import threading
 
-def get_gpu_usage():
-    """Get GPU usage information from nvidia-smi if available."""
-    import subprocess
-    
-    try:
-        # Get GPU utilization and memory info
-        result = subprocess.run([
-            'nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total', 
-            '--format=csv,noheader,nounits'
-        ], capture_output=True, text=True, timeout=3)
-        
-        if result.returncode == 0:
-            gpu_info = result.stdout.strip().split(', ')
-            if len(gpu_info) >= 3:
-                gpu_util = int(gpu_info[0])
-                vram_used = int(gpu_info[1])
-                vram_total = int(gpu_info[2])
-                
-                # For now, we'll assume all GPU usage is from Ollama
-                # In a real implementation, you'd need to match processes
-                return {
-                    "Ollama": {"gpu": gpu_util, "vram": vram_used},
-                    "Whisper": {"gpu": max(0, gpu_util - 20), "vram": vram_used // 3},
-                    "Kokoro": {"gpu": 0, "vram": 0}
-                }
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
-        pass
-    
-    # Fallback to placeholder data
-    return {
-        "Ollama": {"gpu": "-", "vram": "-"},
-        "Whisper": {"gpu": "-", "vram": "-"},
-        "Kokoro": {"gpu": "-", "vram": "-"}
-    }
+def get_service_pids(service_names=["stt", "tts", "llm"]):
+    """Get the PIDs of all running microservices."""
+    pids = {}
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            # Example command: ['python3', '-m', 'uvicorn', 'services.stt_service_server:app', ...]
+            cmdline = proc.info.get('cmdline')
+            if cmdline and "uvicorn" in cmdline and "services." in " ".join(cmdline):
+                for service in service_names:
+                    if f"services.{service}_service_server:app" in " ".join(cmdline):
+                        pids[service] = proc.info['pid']
+                        break
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return pids
 
 class DashboardService:
     def __init__(self):
@@ -93,15 +74,65 @@ class DashboardService:
         resources_table.add_row("-" * 15, "-" * 5, "-" * 8, "-" * 5, "-" * 8)
 
         # App (Main) data
-        app_cpu = psutil.Process().cpu_percent() / psutil.cpu_count()
-        app_ram = psutil.Process().memory_info().rss / (1024 * 1024)
-        resources_table.add_row("App (Main)", f"{app_cpu:.1f}", f"{app_ram:.0f}", "-", "-")
-        resources_table.add_row("  └─ KWD", "(incl)", "", "", "")
+        try:
+            app_process = psutil.Process()
+            app_cpu = app_process.cpu_percent() / psutil.cpu_count()
+            app_ram = app_process.memory_info().rss / (1024 * 1024)
+            resources_table.add_row("App (Main)", f"{app_cpu:.1f}", f"{app_ram:.0f}", "-", "-")
+        except psutil.NoSuchProcess:
+            resources_table.add_row("App (Main)", "offline", "offline", "-", "-")
 
-        # GPU data
-        gpu_data = get_gpu_usage()
-        for service, data in gpu_data.items():
-            resources_table.add_row(service, "-", "-", f"{data['gpu']}", f"{data['vram']}")
+        # --- Microservices Data ---
+        service_pids = get_service_pids(["stt", "tts"])
+        service_names = {"stt": "Whisper", "tts": "Kokoro"}
+        
+        # --- GPU Data ---
+        gpu_util, vram_used = 0, 0
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=utilization.gpu,memory.used', '--format=csv,noheader,nounits'],
+                capture_output=True, text=True, timeout=2
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                gpu_info = result.stdout.strip().split(', ')
+                gpu_util = int(gpu_info[0])
+                vram_used = int(gpu_info[1])
+        except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+            pass # nvidia-smi not found or failed
+
+        # --- Display Microservices (STT, TTS) ---
+        for service_key, display_name in service_names.items():
+            if service_key in service_pids:
+                try:
+                    process = psutil.Process(service_pids[service_key])
+                    cpu = process.cpu_percent() / psutil.cpu_count()
+                    ram = process.memory_info().rss / (1024 * 1024)
+                    resources_table.add_row(display_name, f"{cpu:.1f}", f"{ram:.0f}", "-", "-")
+                except psutil.NoSuchProcess:
+                    resources_table.add_row(display_name, "offline", "offline", "-", "-")
+            else:
+                resources_table.add_row(display_name, "offline", "offline", "-", "-")
+
+        # --- Find and Display Ollama ---
+        ollama_pid = None
+        for proc in psutil.process_iter(['pid', 'name']):
+            if 'ollama' in proc.info.get('name', '').lower():
+                ollama_pid = proc.info['pid']
+                break
+        
+        if ollama_pid:
+            try:
+                process = psutil.Process(ollama_pid)
+                cpu = process.cpu_percent() / psutil.cpu_count()
+                ram = process.memory_info().rss / (1024 * 1024)
+                gpu_display = f"{gpu_util}" if gpu_util > 0 else "-"
+                vram_display = f"{vram_used}" if vram_used > 0 else "-"
+                resources_table.add_row("Ollama", f"{cpu:.1f}", f"{ram:.0f}", gpu_display, vram_display)
+            except psutil.NoSuchProcess:
+                resources_table.add_row("Ollama", "offline", "offline", "-", "-")
+        else:
+            resources_table.add_row("Ollama", "offline", "offline", "-", "-")
 
         # Other info panels
         state_panel = Panel(Text(self.assistant_state, justify="center"), title="State")
