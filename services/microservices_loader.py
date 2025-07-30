@@ -3,6 +3,7 @@ import webrtcvad
 import numpy as np
 import os
 import time
+import requests
 from openwakeword.model import Model
 from .stt_service import STTService
 from .llm_service import LLMService
@@ -12,18 +13,21 @@ from .service_manager import ServiceManager
 from .logger import app_logger
 from .exceptions import ServiceInitializationException, ResourceException
 
-def load_services():
-    """Load all voice assistant services with comprehensive error handling."""
-    log = app_logger.get_logger("loader")
+def load_services_microservices():
+    """Load voice assistant services using microservices architecture."""
+    log = app_logger.get_logger("microservices_loader")
+    service_manager = ServiceManager()
     services = {}
     
     try:
-        # Initialize VAD
+        log.info("Starting microservices-based voice assistant...")
+        
+        # Initialize VAD (runs locally for low latency)
         log.info("Initializing Voice Activity Detection...")
         vad = webrtcvad.Vad(1)
         services["vad"] = vad
         
-        # Load wake word model
+        # Load wake word model (runs locally for low latency)
         log.info("Loading wake word detection model...")
         model_paths = [os.path.join("models", "alexa_v0.1.onnx")]
         
@@ -38,7 +42,35 @@ def load_services():
         oww_model = Model(wakeword_model_paths=model_paths)
         services["oww_model"] = oww_model
         
-        # Initialize core services
+        # Start TTS microservice
+        log.info("Starting TTS microservice...")
+        tts_process = service_manager.start_service(
+            "tts_service",
+            "python3 -m uvicorn services.tts_service_server:app --host 0.0.0.0 --port 8001",
+            port=8001
+        )
+        
+        if not tts_process:
+            raise ServiceInitializationException("TTS", "Failed to start TTS microservice")
+        
+        # Wait for TTS service to be ready
+        log.info("Waiting for TTS service to initialize...")
+        tts_service = TTSClient(port=8001)
+        
+        # Wait up to 30 seconds for service to be ready
+        for attempt in range(30):
+            if tts_service.health_check():
+                log.info("TTS microservice is ready")
+                break
+            time.sleep(1)
+        else:
+            raise ServiceInitializationException("TTS", "TTS microservice failed to become ready")
+        
+        services["tts_service"] = tts_service
+        
+        # Initialize remaining services locally (for now)
+        # TODO: Convert these to microservices as well
+        
         try:
             log.info("Initializing Speech-to-Text service...")
             stt_service = STTService()
@@ -54,13 +86,6 @@ def load_services():
             raise ServiceInitializationException("LLM", str(e))
         
         try:
-            log.info("Initializing Text-to-Speech service...")
-            tts_service = TTSService()
-            services["tts_service"] = tts_service
-        except Exception as e:
-            raise ServiceInitializationException("TTS", str(e))
-        
-        try:
             log.info("Initializing Dynamic RMS service...")
             dynamic_rms = DynamicRMSService()
             dynamic_rms.start()
@@ -68,36 +93,22 @@ def load_services():
         except Exception as e:
             raise ServiceInitializationException("DynamicRMS", str(e))
         
-        # Warm up models for better performance
+        # Warm up models
         log.info("Warming up models for optimal performance...")
-        _warmup_models(oww_model, stt_service, tts_service, llm_service, log)
+        _warmup_models_microservices(oww_model, stt_service, tts_service, llm_service, log)
         
         log.info("All services loaded and warmed up successfully")
         
-        return vad, oww_model, stt_service, llm_service, tts_service, dynamic_rms
+        return vad, oww_model, stt_service, llm_service, tts_service, dynamic_rms, service_manager
         
-    except (ServiceInitializationException, ResourceException) as e:
-        # Cleanup any partially initialized services
-        _cleanup_services(services)
-        
-        # Re-raise the specific exception
-        raise e
     except Exception as e:
-        # Cleanup any partially initialized services
+        log.error(f"Failed to load microservices: {e}", exc_info=True)
+        # Cleanup
+        service_manager.stop_all_services()
         _cleanup_services(services)
-        
-        # Wrap unexpected errors in ServiceInitializationException
-        raise ServiceInitializationException(
-            "service_loader",
-            f"An unexpected error occurred during service loading: {str(e)}",
-            context={
-                "loaded_services": list(services.keys()),
-                "error_type": type(e).__name__
-            }
-        ) from e
+        raise
 
-
-def _warmup_models(oww_model, stt_service, tts_service, llm_service, log):
+def _warmup_models_microservices(oww_model, stt_service, tts_service, llm_service, log):
     """Warm up all models with detailed timing and error handling."""
     warmup_times = {}
     
@@ -126,15 +137,15 @@ def _warmup_models(oww_model, stt_service, tts_service, llm_service, log):
     except Exception as e:
         log.warning(f"Whisper STT warmup failed: {e}")
     
-    # Warm up TTS
+    # Warm up TTS microservice
     try:
-        log.debug("Warming up TTS service...")
+        log.debug("Warming up TTS microservice...")
         start_time = time.time()
         tts_service.warmup()
         warmup_times["tts"] = time.time() - start_time
-        log.debug(f"TTS warmup completed in {warmup_times['tts']:.2f}s")
+        log.debug(f"TTS microservice warmup completed in {warmup_times['tts']:.2f}s")
     except Exception as e:
-        log.warning(f"TTS warmup failed: {e}")
+        log.warning(f"TTS microservice warmup failed: {e}")
     
     # Warm up LLM
     try:
@@ -149,17 +160,16 @@ def _warmup_models(oww_model, stt_service, tts_service, llm_service, log):
     # Log performance metrics
     total_warmup_time = sum(warmup_times.values())
     app_logger.log_performance(
-        "model_warmup",
+        "microservices_warmup",
         total_warmup_time,
         warmup_times
     )
     
     log.info(f"Model warmup completed in {total_warmup_time:.2f} seconds")
 
-
 def _cleanup_services(services):
     """Clean up partially initialized services."""
-    log = app_logger.get_logger("loader")
+    log = app_logger.get_logger("microservices_loader")
     
     for service_name, service in services.items():
         try:
