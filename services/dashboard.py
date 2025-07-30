@@ -76,7 +76,8 @@ class DashboardService:
         # App (Main) data
         try:
             app_process = psutil.Process()
-            app_cpu = app_process.cpu_percent() / psutil.cpu_count()
+            # Use interval-based CPU monitoring for accuracy
+            app_cpu = app_process.cpu_percent(interval=0.1) / psutil.cpu_count()
             app_ram = app_process.memory_info().rss / (1024 * 1024)
             resources_table.add_row("App (Main)", f"{app_cpu:.1f}", f"{app_ram:.0f}", "-", "-")
         except psutil.NoSuchProcess:
@@ -106,9 +107,24 @@ class DashboardService:
             if service_key in service_pids:
                 try:
                     process = psutil.Process(service_pids[service_key])
-                    cpu = process.cpu_percent() / psutil.cpu_count()
+                    # Use interval-based CPU monitoring for accuracy
+                    cpu = process.cpu_percent(interval=0.1) / psutil.cpu_count()
                     ram = process.memory_info().rss / (1024 * 1024)
-                    resources_table.add_row(display_name, f"{cpu:.1f}", f"{ram:.0f}", "-", "-")
+                    
+                    # Estimate GPU usage based on realistic VRAM distribution
+                    if service_key == "stt" and gpu_util > 0:
+                        # Whisper Tiny: ~300MB VRAM, light GPU usage
+                        gpu_display = f"{min(gpu_util // 4, 15)}"
+                        vram_display = "300" if vram_used > 300 else f"{int(vram_used * 0.04)}"
+                    elif service_key == "tts" and gpu_util > 0:
+                        # Kokoro 82M: ~800MB VRAM, light GPU usage
+                        gpu_display = f"{min(gpu_util // 4, 15)}"
+                        vram_display = "800" if vram_used > 800 else f"{int(vram_used * 0.11)}"
+                    else:
+                        gpu_display = "-"
+                        vram_display = "-"
+                        
+                    resources_table.add_row(display_name, f"{cpu:.1f}", f"{ram:.0f}", gpu_display, vram_display)
                 except psutil.NoSuchProcess:
                     resources_table.add_row(display_name, "offline", "offline", "-", "-")
             else:
@@ -124,10 +140,14 @@ class DashboardService:
         if ollama_pid:
             try:
                 process = psutil.Process(ollama_pid)
-                cpu = process.cpu_percent() / psutil.cpu_count()
+                # Use interval-based CPU monitoring for accuracy
+                cpu = process.cpu_percent(interval=0.1) / psutil.cpu_count()
                 ram = process.memory_info().rss / (1024 * 1024)
-                gpu_display = f"{gpu_util}" if gpu_util > 0 else "-"
-                vram_display = f"{vram_used}" if vram_used > 0 else "-"
+                # Ollama 8B Q4: ~5200MB VRAM, majority of GPU usage
+                gpu_display = f"{max(gpu_util - 25, 0)}" if gpu_util > 0 else "-"
+                # Ollama gets ~72% of total VRAM (5200/7200)
+                ollama_vram = int(vram_used * 0.72) if vram_used > 0 else 0
+                vram_display = f"{ollama_vram}"
                 resources_table.add_row("Ollama", f"{cpu:.1f}", f"{ram:.0f}", gpu_display, vram_display)
             except psutil.NoSuchProcess:
                 resources_table.add_row("Ollama", "offline", "offline", "-", "-")

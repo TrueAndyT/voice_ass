@@ -9,29 +9,15 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-# Suppress ALSA, JACK, and PulseAudio warnings in microservice
+# Set audio environment for proper device access
 os.environ['ALSA_PCM_CARD'] = 'default'
 os.environ['ALSA_PCM_DEVICE'] = '0'
-os.environ['PULSE_RUNTIME_PATH'] = '/dev/null'  # Suppress PulseAudio warnings
-# Redirect stderr and stdout temporarily to suppress audio warnings
-original_stderr = os.dup(2)
-original_stdout = os.dup(1)
-os.close(2)
-os.close(1)
-os.open(os.devnull, os.O_RDWR)
-os.open(os.devnull, os.O_RDWR)
 
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 from services.tts_service import TTSService
 from services.logger import app_logger
-
-# Restore stderr and stdout after imports
-os.dup2(original_stderr, 2)
-os.dup2(original_stdout, 1)
-os.close(original_stderr)
-os.close(original_stdout)
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -50,6 +36,16 @@ async def startup_event():
     log.info("Starting TTS microservice...")
     try:
         tts_service = TTSService()
+        # Add memory management for GPU usage
+        try:
+            if hasattr(tts_service.pipeline, 'model'):
+                tts_service.pipeline.model.to('cuda')
+        except RuntimeError as e:
+            if 'out of memory' in str(e):
+                log.warning('GPU out of memory, TTS falling back to CPU')
+                tts_service.device = 'cpu'
+            else:
+                raise
         tts_service.warmup()
         log.info("TTS microservice started and warmed up successfully")
     except Exception as e:
@@ -65,10 +61,11 @@ async def health_check():
 
 @app.post("/speak")
 async def speak(request: SpeakRequest):
-    """API endpoint to speak the given text."""
+    """API endpoint to speak the given text synchronously."""
     if not tts_service:
         return {"error": "TTS service not initialized"}, 503
     try:
+        # This call will now block until speaking is finished
         tts_service.speak(request.text)
         return {"status": "success"}
     except Exception as e:

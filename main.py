@@ -43,11 +43,11 @@ def play_beep(sound_type="ready", log=None):
             # Map sound types to files
             sound_files = {
                 "ready": "ready.wav",
-                "kwd_ready": "kwd_ready.wav", 
+                "kwd_success": "kwd_success.wav", 
                 "end": "end.wav"
             }
             
-            sound_filename = sound_files.get(sound_type, "kwd_ready.wav")
+            sound_filename = sound_files.get(sound_type, "kwd_success.wav")
             sound_file = os.path.join(base_path, sound_filename)
             
             if log:
@@ -483,10 +483,7 @@ def main():
         ) as stream:
             
             log.info("Main application loop started")
-            
-            # Play beep to indicate KWD is ready for wake word detection
             log.info("Wake word detection is now active - listening for 'Alexa'")
-            play_beep(sound_type="kwd_ready", log=log)
             
             while True:
                 try:
@@ -522,6 +519,8 @@ def main():
                     # Handle wake word detection
                     if prediction:
                         log.info(f"Wake word detected! Confidence: {prediction}")
+                        # Play beep to confirm wake word detection
+                        play_beep(sound_type="kwd_success", log=log)
                         # Don't update intent here - let the wake word interaction handle it
                         handle_wake_word_interaction(stt_service, llm_service, tts_service, log, dashboard)
                             

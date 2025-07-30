@@ -24,12 +24,17 @@ class ServiceManager:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(current_dir)
             
+            # Ensure audio environment variables are properly inherited
+            import os
+            env = os.environ.copy()
+            # Remove audio suppression for TTS service
+            if 'tts_service' in command:
+                env.pop('ALSA_SUPPRESS_ERRORS', None)
+            
             process = subprocess.Popen(
                 command, 
                 shell=True, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE,
-                text=True,
+                env=env,
                 cwd=project_root
             )
             self.services.append({

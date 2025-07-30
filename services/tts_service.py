@@ -55,62 +55,55 @@ class TTSService:
     def speak(self, text):
         self.log.debug(f"Speaking: '{text}'")
         
-        chunks = self._segment_text(text)
-        chunk_queue = queue.Queue()
+        # Create a queue to hold generated audio chunks
+        audio_queue = queue.Queue()
+        
+        # Use a poison pill to signal the end of generation
+        POISON_PILL = None
 
-        def generate_audio(chunk, out_queue):
+        def audio_generation_thread(text_chunks):
             try:
-                # Ensure the input chunk is a tensor on the correct device
-                chunk_tensor = torch.tensor(self.pipeline.tokenizer.encode(chunk), device=self.device).unsqueeze(0)
-                generator = self.pipeline(chunk_tensor, voice=self.voice_model)
-                audio_frames = []
-                for _, _, audio in generator:
-                    if isinstance(audio, torch.Tensor):
-                        audio_np = audio.detach().cpu().numpy()
-                        del audio
-                        torch.cuda.empty_cache()
-                    else:
-                        audio_np = audio
-
-                    if audio_np.dtype != np.float32:
-                        audio_np = audio_np.astype(np.float32) / np.iinfo(audio_np.dtype).max
-
-                    audio_frames.append(audio_np)
-                full_audio = np.concatenate(audio_frames)
-                out_queue.put(full_audio)
+                for chunk in text_chunks:
+                    generator = self.pipeline(chunk, voice=self.voice_model)
+                    for _, _, audio in generator:
+                        if isinstance(audio, torch.Tensor):
+                            audio_np = audio.detach().cpu().numpy()
+                            if self.device == "cuda":
+                                torch.cuda.empty_cache()
+                        else:
+                            audio_np = audio
+                        
+                        if audio_np.dtype != np.float32:
+                            audio_np = audio_np.astype(np.float32) / np.iinfo(audio_np.dtype).max
+                        
+                        audio_queue.put(audio_np)
             except Exception as e:
                 self.log.error(f"TTS generator error: {e}")
-                out_queue.put(None)
+                import traceback
+                self.log.error(traceback.format_exc())
+            finally:
+                audio_queue.put(POISON_PILL)
 
+        # Start the audio generation thread
+        text_chunks = self._segment_text(text)
+        gen_thread = threading.Thread(target=audio_generation_thread, args=(text_chunks,))
+        gen_thread.start()
+
+        # Play audio from the queue
         try:
-            self._stream = sd.OutputStream(samplerate=self.sample_rate, channels=1, dtype='float32', blocksize=256)
-            self._stream.start()
-
-            for i, chunk in enumerate(chunks):
-                next_queue = queue.Queue()
-                thread = threading.Thread(target=generate_audio, args=(chunk, next_queue))
-                thread.start()
-
-                audio_data = next_queue.get()
-                if audio_data is not None and len(audio_data) > 0:
-                    self._stream.write(audio_data)
-
-                thread.join()
-
+            with sd.OutputStream(samplerate=self.sample_rate, channels=1, dtype='float32') as stream:
+                self.log.info("Audio stream opened successfully.")
+                while True:
+                    audio_chunk = audio_queue.get()
+                    if audio_chunk is POISON_PILL:
+                        self.log.info("Poison pill received, closing stream.")
+                        break
+                    stream.write(audio_chunk)
+                self.log.info("Finished writing to audio stream.")
         except Exception as e:
-            if "cuFFT" in str(e) or "CUDA" in str(e):
-                self.log.warning("cuFFT or CUDA crash detected, attempting TTS pipeline recovery...")
-                try:
-                    self.pipeline = self._build_pipeline()
-                    self.log.info("TTS pipeline recovered successfully")
-                except Exception as rebuild_error:
-                    self.log.error(f"Failed to rebuild TTS pipeline: {rebuild_error}")
-            self.log.error(f"TTS playback error: {e}")
+            self.log.error(f"TTS playback failed: {e}", exc_info=True)
         finally:
-            if self._stream:
-                self._stream.stop()
-                self._stream.close()
-                self._stream = None
+            gen_thread.join() # Ensure generator thread is cleaned up
 
     def _segment_text(self, text, max_chars=300):
         sentences = re.split(r'(?<=[.?!])\s+', text)

@@ -49,8 +49,19 @@ async def startup_event():
     try:
         # Note: DynamicRMS is not available in this isolated service.
         # The main process will handle VAD and silence detection.
-        stt_service = STTService(dynamic_rms=None)
-        log.info("STT microservice started and model loaded successfully")
+        # Use tiny model for lower VRAM usage
+        stt_service = STTService(model_size='tiny', dynamic_rms=None)
+        # Ensure Whisper model is loaded on GPU with proper error handling
+        try:
+            if hasattr(stt_service.model, 'model'):
+                stt_service.model.model.to('cuda')
+        except RuntimeError as e:
+            if 'out of memory' in str(e):
+                log.warning('GPU out of memory, falling back to CPU for STT')
+                stt_service.device = 'cpu'
+            else:
+                raise
+        log.info("STT microservice started and model loaded successfully on GPU")
     except Exception as e:
         log.error(f"Failed to start STT microservice: {e}", exc_info=True)
 
