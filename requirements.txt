@@ -6,7 +6,8 @@ webrtcvad
 numpy
 
 # Wake Word Detection
-openwakeword==0.5.1
+# Note: openwakeword has Python version constraints, skipping for now
+# openwakeword==0.5.1
 onnxruntime
 
 # Whisper STT
@@ -21,3 +22,8 @@ kokoro
 
 # Logging and Utility
 requests
+
+# Vector Search and Embeddings
+llama-index
+faiss-cpu
+sentence-transformers

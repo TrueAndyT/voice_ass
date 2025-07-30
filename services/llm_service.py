@@ -5,7 +5,7 @@ from datetime import datetime
 from .logger import app_logger
 from .exceptions import LLMException, ResourceException, ConfigurationException
 from .web_search_service import WebSearchService
-from .file_search_service import FileSearchService
+from .llama_file_search_service import LlamaFileSearchService
 from .tts_service import TTSService
 from .intent_detector import IntentDetector
 from .llm_text import LLMText
@@ -28,7 +28,7 @@ class LLMService:
         self.intent_detector = IntentDetector()
         self.tts = TTSService()
         self.web = WebSearchService()
-        self.search = FileSearchService()
+        self.search = LlamaFileSearchService()
         self.memory_path = os.path.join("config", "memory.log")
 
         self.system_prompt = {'role': 'system', 'content': self._build_system_prompt()}
