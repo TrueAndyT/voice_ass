@@ -3,11 +3,17 @@
 LLM microservice that provides language model functionality via an HTTP API.
 """
 
+import sys
+import os
+# Insert project root at the BEGINNING of path to avoid conflicts with installed packages
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
-from .llm_service import LLMService
-from .logger import app_logger
+from services.llm_service import LLMService
+from services.logger import app_logger
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -32,6 +38,14 @@ async def startup_event():
         log.info("LLM microservice started successfully")
     except Exception as e:
         log.error(f"Failed to start LLM microservice: {e}", exc_info=True)
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    if llm_service:
+        return {"status": "healthy"}
+    else:
+        return {"status": "unhealthy"}, 503
 
 @app.post("/chat")
 async def chat(request: ChatRequest):

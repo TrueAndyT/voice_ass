@@ -11,7 +11,7 @@ import subprocess
 from contextlib import contextmanager
 
 # Import from the services package
-from services.loader import load_services
+from services.microservices_loader import load_services_microservices
 from services.kwd_service import KWDService
 from services.logger import app_logger
 from services.memory_logger import MemoryLogger
@@ -155,8 +155,9 @@ def main():
         
         # Load services with detailed error handling
         log.info("Loading services...")
+        service_manager = None
         try:
-            vad, oww_model, stt_service, llm_service, tts_service, dynamic_rms = load_services()
+            vad, oww_model, stt_service, llm_service, tts_service, dynamic_rms, service_manager = load_services_microservices()
             kwd_service = KWDService(oww_model, vad, dynamic_rms)
         except Exception as e:
             raise ServiceInitializationException(
@@ -263,6 +264,8 @@ def main():
         # Cleanup resources
         if mem_logger:
             mem_logger.stop()
+        if service_manager:
+            service_manager.stop_all_services()
         log.info("Voice Assistant shutting down...")
         logging.shutdown()
 

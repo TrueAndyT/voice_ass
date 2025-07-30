@@ -19,12 +19,18 @@ class ServiceManager:
         """Start a microservice as a subprocess."""
         self.log.info(f"Starting service: {name} on {host}:{port}")
         try:
+            # Get the project root directory (parent of services directory)
+            import os
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(current_dir)
+            
             process = subprocess.Popen(
                 command, 
                 shell=True, 
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                cwd=project_root
             )
             self.services.append({
                 "name": name,

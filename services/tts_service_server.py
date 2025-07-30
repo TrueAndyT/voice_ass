@@ -3,11 +3,17 @@
 TTS microservice that provides text-to-speech functionality via an HTTP API.
 """
 
+import sys
+import os
+# Insert project root at the BEGINNING of path to avoid conflicts with installed packages
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
-from .tts_service import TTSService
-from .logger import app_logger
+from services.tts_service import TTSService
+from services.logger import app_logger
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -30,6 +36,14 @@ async def startup_event():
         log.info("TTS microservice started and warmed up successfully")
     except Exception as e:
         log.error(f"Failed to start TTS microservice: {e}", exc_info=True)
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    if tts_service:
+        return {"status": "healthy"}
+    else:
+        return {"status": "unhealthy"}, 503
 
 @app.post("/speak")
 async def speak(request: SpeakRequest):
