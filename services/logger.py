@@ -52,7 +52,7 @@ class ColorFormatter(logging.Formatter):
     def format(self, record):
         color = self.COLORS.get(record.levelname, self.COLORS["RESET"])
         record.levelname = f"{color}{record.levelname.ljust(8)}{self.COLORS['RESET']}"
-        record.name = f"\033[96m{record.name.ljust(12)}\033[0m" # Cyan
+        record.name = f"\033[96m{record.name.ljust(20)}\033[0m" # Cyan, aligned to microservices_loader
         return super().format(record)
 
 
