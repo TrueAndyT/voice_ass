@@ -24,12 +24,29 @@ class KWDService:
         # Cooldown tracking
         self.last_detection_time = 0
         self.in_cooldown = False
+        
+        # KWD control
+        self.enabled = False  # KWD starts disabled
 
+    def enable(self):
+        """Enable wake word detection."""
+        self.enabled = True
+        self.log.info("Wake word detection enabled")
+    
+    def disable(self):
+        """Disable wake word detection."""
+        self.enabled = False
+        self.log.info("Wake word detection disabled")
+    
     def process_audio(self, audio_chunk_bytes):
         """
         Continuously processes audio chunks, feeding them into a sliding 
         1-second buffer for wake word detection.
         """
+        # Skip processing if KWD is disabled
+        if not self.enabled:
+            return None, None
+        
         # Convert raw bytes to numpy array
         chunk_np = np.frombuffer(audio_chunk_bytes, dtype=np.int16)
         
@@ -44,6 +61,28 @@ class KWDService:
             else:
                 self.in_cooldown = False
                 self.log.debug("Cooldown period ended")
+        
+        # === Audio filtering before wake word detection ===
+        
+        # 1. Check RMS threshold - skip if audio is too quiet (background noise)
+        dynamic_threshold = self.dynamic_rms.get_threshold()
+        audio_np = chunk_np.astype(np.float32) / self.MAX_INT16
+        current_rms = np.sqrt(np.mean(audio_np**2))
+        
+        if current_rms <= dynamic_threshold:
+            # Audio is below dynamic threshold, likely background noise
+            return None, None
+        
+        # 2. Use VAD to confirm voice activity
+        try:
+            is_speech = self.vad.is_speech(audio_chunk_bytes, sample_rate=self.RATE)
+            if not is_speech:
+                # No voice activity detected
+                return None, None
+        except Exception as e:
+            self.log.debug(f"VAD error: {e}, proceeding without VAD check")
+        
+        # === Proceed with wake word detection ===
         
         # Get the current 1-second window for prediction
         prediction_buffer = np.array(self.audio_buffer, dtype=np.int16)
@@ -60,13 +99,8 @@ class KWDService:
             # Send the 1-second buffer to the wake word model
             prediction = self.oww_model.predict(prediction_buffer)
             
-            # You can add logic here to check if a wake word was detected
-            # For now, we'll just log the scores
-            # formatted_scores = {k.split('/')[-1]: f"{v:.2f}" for k, v in prediction.items()}
-            # self.log.debug(f"Prediction scores: {formatted_scores}")
-            
-            # Check if any score is above a certain threshold, e.g., 0.5
-            if any(score > 0.5 for score in prediction.values()):
+            # Check if any score is above the required threshold of 0.77
+            if any(score > 0.77 for score in prediction.values()):
                 self.log.info(f"Wake word detected! Scores: {prediction}")
                 # Enter cooldown period
                 self.enter_cooldown()

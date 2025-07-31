@@ -19,40 +19,18 @@ import webrtcvad
 import numpy as np
 import threading
 
-# import zmq
-
 # Import from the services package
 from services.microservices_loader import load_services_microservices
 from services.kwd_service import KWDService
 from services.logger import app_logger
 from services.memory_logger import MemoryLogger
 from services.dynamic_rms_service import DynamicRMSService
-# from services.dashboard_service import DashboardService
 from services.exceptions import (
     MicrophoneException, 
     ServiceInitializationException, 
     AudioException,
     VoiceAssistantException
 )
-
-# class DashboardPublisher:
-#     def __init__(self, port=5555):
-#         self.context = zmq.Context()
-#         self.socket = self.context.socket(zmq.PUB)
-#         self.socket.bind(f"tcp://*:{port}")
-#         # Give ZeroMQ time to establish the connection
-#         time.sleep(0.5)
-
-#     def publish(self, data):
-#         try:
-#             self.socket.send_json(data)
-#             print(f"[PUBLISHER] Sent: {data}")  # Debug
-#         except Exception as e:
-#             print(f"[PUBLISHER] Error sending: {e}")
-
-#     def close(self):
-#         self.socket.close()
-#         self.context.term()
 
 def play_beep(log=None):
     """Play the wake word detection sound."""
@@ -202,7 +180,7 @@ def record_audio_for_transcription(stream, timeout_ms=3000, log=None):
     return b''.join(recorded_frames)
 
 
-def handle_wake_word_interaction(stt_service, llm_service, tts_service, log, publisher=None):
+def handle_wake_word_interaction(stt_service, llm_service, tts_service, log):
     """Handle the interaction after wake word detection."""
     try:
         log.info("Starting transcription after wake word detection")
@@ -237,79 +215,56 @@ def handle_wake_word_interaction(stt_service, llm_service, tts_service, log, pub
         # if publisher:
         #     publisher.publish({"stt_output": transcription})
         
-        # Process with LLM
-        # if publisher:
-        #     publisher.publish({"state": "Thinking"})
-            
-        llm_start_time = time.time()
-        llm_result = llm_service.get_response(transcription)
-        llm_end_time = time.time()
-        
-        # Handle both tuple and single return values for backward compatibility
-        if isinstance(llm_result, tuple):
-            llm_response, ollama_metrics = llm_result
-        else:
-            llm_response = llm_result
-            ollama_metrics = {}
-        
-        # Extract intent from the LLM service
-        intent = llm_service.intent_detector.detect(transcription)
-        # if publisher:
-        #     publisher.publish({"intent": intent})
-        
-        # Use Ollama's native metrics or fallback to calculated ones
-        llm_duration = llm_end_time - llm_start_time
-        perf_data = {
-            "LLM Response": f"{llm_duration:.2f}s"
-        }
-        
-        # Add Ollama's native metrics if available
-        log.info(f"Ollama metrics received: {ollama_metrics}")
-        if ollama_metrics:
-            if 'tokens_per_second' in ollama_metrics:
-                perf_data["Tokens/sec"] = ollama_metrics['tokens_per_second']
-            if 'time_to_first_token' in ollama_metrics:
-                perf_data["First Token"] = ollama_metrics['time_to_first_token']
-            if 'completion_tokens' in ollama_metrics:
-                perf_data["Output Tokens"] = str(ollama_metrics['completion_tokens'])
-            if 'prompt_tokens' in ollama_metrics:
-                perf_data["Input Tokens"] = str(ollama_metrics['prompt_tokens'])
-        else:
-            # Fallback calculations if Ollama metrics not available
-            tokens_count = len(llm_response.split()) if llm_response else 0
-            tokens_per_sec = tokens_count / llm_duration if llm_duration > 0 else 0
-            perf_data["Tokens/sec"] = f"{tokens_per_sec:.1f}"
-            perf_data["First Token"] = f"{min(0.31, llm_duration/2):.2f}s"
-            perf_data["Output Tokens"] = str(tokens_count)
-            perf_data["Input Tokens"] = str(len(transcription.split()))
-        app_logger.log_performance(
-            "llm_response", 
-            llm_duration,
-            {"input_length": len(transcription), "output_length": len(llm_response)}
-        )
-        
-        # Speak response
-        # if publisher:
-        #     publisher.publish({"state": "Speaking"})
-        #     publisher.publish({"llm_output": llm_response})
-        #     publisher.publish({"performance": perf_data})
-            
+        # Process with streaming LLM to TTS
         tts_start_time = time.time()
-        log.info(f"LLM Response: {llm_response}")
-        tts_service.speak(llm_response)
+        log.info(f"LLM Query: {transcription}")
         
-        speech_to_tts_time = tts_start_time - speech_end_time
-        perf_data["Speech→TTS"] = f"{speech_to_tts_time:.2f}s"
-        # if publisher:
-        #     publisher.publish({"performance": perf_data})
+        try:
+            # Try to use streaming LLM client if available
+            from services.tts_streaming_client import create_llm_tts_bridge
+            bridge = create_llm_tts_bridge()
             
+            # Stream LLM response directly to TTS
+            llm_stream = llm_service.get_response_stream(transcription)
+            bridge.stream_llm_to_tts(llm_stream, chunk_size=100)
+            
+            log.info("Streaming LLM to TTS completed")
+            
+        except (ImportError, AttributeError, Exception) as e:
+            # Fallback to traditional approach if streaming not available
+            log.warning(f"Streaming not available, using traditional approach: {e}")
+            
+            llm_result = llm_service.get_response(transcription)
+            
+            # Handle both tuple and single return values for backward compatibility
+            if isinstance(llm_result, tuple):
+                llm_response, ollama_metrics = llm_result
+            else:
+                llm_response = llm_result
+                ollama_metrics = {}
+            
+            log.info(f"LLM Response: {llm_response}")
+            
+            # Use streaming TTS client for chunked playback
+            try:
+                from services.tts_streaming_client import create_streaming_tts_client
+                streaming_tts = create_streaming_tts_client()
+                streaming_tts.speak(llm_response)
+            except Exception as tts_error:
+                log.warning(f"Streaming TTS failed, using regular TTS: {tts_error}")
+                tts_service.speak(llm_response)
+
+        # Log performance metrics
+        speech_to_tts_time = tts_start_time - speech_end_time
+        log.info(f"Speech→TTS latency: {speech_to_tts_time:.2f}s")
+        
         app_logger.log_performance(
-            "speech_to_tts", 
+            "speech_to_tts",
             speech_to_tts_time
         )
         
         # Handle follow-up conversation
-        handle_followup_conversation(stt_service, llm_service, tts_service, log, publisher)
+        handle_followup_conversation(stt_service, llm_service, tts_service, log)
         
         log.info("Conversation ended - listening for wake word again")
         # if publisher:
@@ -326,7 +281,7 @@ def handle_wake_word_interaction(stt_service, llm_service, tts_service, log, pub
         # Continue running - don't crash the main loop
 
 
-def handle_followup_conversation(stt_service, llm_service, tts_service, log, publisher=None):
+def handle_followup_conversation(stt_service, llm_service, tts_service, log):
     """Handle the follow-up conversation loop."""
     while True:
         try:
@@ -351,25 +306,49 @@ def handle_followup_conversation(stt_service, llm_service, tts_service, log, pub
             speech_end_time = time.time()
             log.info(f"Follow-up transcription: {follow_up}")
             
-            llm_start_time = time.time()
-            llm_result = llm_service.get_response(follow_up)
-            llm_end_time = time.time()
-            
-            # Handle both tuple and single return values for backward compatibility
-            if isinstance(llm_result, tuple):
-                llm_response, _ = llm_result  # Ignore metrics in follow-up for now
-            else:
-                llm_response = llm_result
-            
-            app_logger.log_performance(
-                "followup_llm_response", 
-                llm_end_time - llm_start_time,
-                {"input_length": len(follow_up)}
-            )
-            
             tts_start_time = time.time()
-            log.info(f"LLM Response: {llm_response}")
-            tts_service.speak(llm_response)
+            
+            try:
+                # Try to use streaming for follow-up responses too
+                from services.tts_streaming_client import create_llm_tts_bridge
+                bridge = create_llm_tts_bridge()
+                
+                # Stream LLM response directly to TTS
+                llm_stream = llm_service.get_response_stream(follow_up)
+                bridge.stream_llm_to_tts(llm_stream, chunk_size=80)
+                
+                log.info("Streaming follow-up LLM to TTS completed")
+                
+            except (ImportError, AttributeError, Exception) as e:
+                # Fallback to traditional approach
+                log.debug(f"Follow-up streaming not available, using traditional approach: {e}")
+                
+                llm_start_time = time.time()
+                llm_result = llm_service.get_response(follow_up)
+                llm_end_time = time.time()
+                
+                # Handle both tuple and single return values for backward compatibility
+                if isinstance(llm_result, tuple):
+                    llm_response, _ = llm_result  # Ignore metrics in follow-up for now
+                else:
+                    llm_response = llm_result
+                
+                app_logger.log_performance(
+                    "followup_llm_response", 
+                    llm_end_time - llm_start_time,
+                    {"input_length": len(follow_up)}
+                )
+                
+                log.info(f"LLM Response: {llm_response}")
+                
+                # Try streaming TTS client, fallback to regular TTS
+                try:
+                    from services.tts_streaming_client import create_streaming_tts_client
+                    streaming_tts = create_streaming_tts_client()
+                    streaming_tts.speak(llm_response)
+                except Exception as tts_error:
+                    log.debug(f"Streaming TTS failed, using regular TTS: {tts_error}")
+                    tts_service.speak(llm_response)
             
             app_logger.log_performance(
                 "followup_speech_to_tts", 
@@ -433,6 +412,8 @@ def main():
         try:
             vad, oww_model, stt_service, llm_service, tts_service, dynamic_rms, service_manager = load_services_microservices()
             kwd_service = KWDService(oww_model, vad, dynamic_rms)
+            # Enable KWD after successful initialization
+            kwd_service.enable()
         except Exception as e:
             raise ServiceInitializationException(
                 "services", 
@@ -457,21 +438,6 @@ def main():
         except Exception as e:
             log.warning(f"Could not announce readiness: {e}")
             
-        # # Start dashboard publisher
-        # publisher = DashboardPublisher()
-        
-        # # Start dashboard service as subprocess
-        # dashboard = subprocess.Popen([sys.executable, "-m", "services.dashboard_service"])
-        
-        # # Give dashboard time to connect before sending initial messages
-        # time.sleep(1.0)
-        
-        # # Send initial state
-        # publisher.publish({"performance": {"Startup": f"{startup_duration:.2f}s"}})
-        # publisher.publish({"state": "Listening"})
-        # publisher.publish({"intent": "N/A"})
-        
-        publisher = None  # Set to None so the rest of the code works
         
         log.info("Voice assistant ready - listening for wake word...")
         
@@ -492,25 +458,6 @@ def main():
                     )
                     # Update dynamic RMS threshold with the same audio data
                     dynamic_rms.update_threshold(audio_chunk)
-                    # if publisher:
-                    #     # Calculate normalized RMS for meaningful display
-                    #     audio_data = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32)
-                    #     # Normalize to -1.0 to 1.0 range
-                    #     normalized_audio = audio_data / 32768.0
-                    #     current_rms = np.sqrt(np.mean(normalized_audio**2))
-                    #     # Scale to percentage for display
-                    #     rms_percentage = current_rms * 100
-                    #     threshold_percentage = dynamic_rms.get_threshold() * 100 if dynamic_rms.get_threshold() else 0
-                    #     publisher.publish({"audio_level": f"{rms_percentage:.2f} / {threshold_percentage:.2f}"})
-                    #     
-                    #     # Update system resources and performance periodically
-                    #     import psutil
-                    #     cpu_percent = psutil.cpu_percent()
-                    #     memory_info = psutil.virtual_memory()
-                    #     publisher.publish({"performance": {
-                    #         "CPU Usage": f"{cpu_percent:.1f}%",
-                    #         "Memory": f"{memory_info.percent:.1f}%"
-                    #     }})
                     
                     # Process audio with wake word detection
                     prediction, utterance_buffer = kwd_service.process_audio(audio_chunk)
@@ -519,7 +466,7 @@ def main():
                     if prediction:
                         log.info(f"Wake word detected! Confidence: {prediction}")
                         # Don't update intent here - let the wake word interaction handle it
-                        handle_wake_word_interaction(stt_service, llm_service, tts_service, log, publisher)
+                        handle_wake_word_interaction(stt_service, llm_service, tts_service, log)
                             
                 except AudioException as e:
                     log.error(f"Audio processing error: {e}")
@@ -556,11 +503,6 @@ def main():
         
     finally:
         # Cleanup resources
-        # if 'publisher' in locals() and publisher is not None:
-        #     publisher.close()
-        # if 'dashboard' in locals() and dashboard.poll() is None:
-        #     dashboard.terminate()
-        #     dashboard.wait()
         if mem_logger:
             mem_logger.stop()
         if service_manager:

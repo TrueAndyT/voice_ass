@@ -22,14 +22,14 @@ MAX_INT16 = 32767.0
 class STTService:
     """A service for transcribing speech with Whisper, VAD, and dynamic thresholding."""
 
-    def __init__(self, model_size="small", dynamic_rms=None):
+    def __init__(self, model_size="small.en", dynamic_rms=None):
         self.log = app_logger.get_logger("stt_service")
         self.log.info(f"Initializing STT service with model: {model_size}")
         
         self.device = self._get_device()
         self.model = self._load_model(model_size)
         self.vad = webrtcvad.Vad(3)
-        self.allowed_languages = {'en', 'uk'}
+        self.model_size = model_size  # Store model size for transcription options
         self.dynamic_rms = dynamic_rms
 
         # Dedicated logger for transcriptions
@@ -191,14 +191,18 @@ class STTService:
             return ""
 
         try:
-            # Force English transcription only
-            result = self.model.transcribe(
-                audio_np, 
-                fp16=(self.device == "cuda"), 
-                language='en',  # Force English language
-                no_speech_threshold=0.6
-            )
-
+            # Use optimized transcription settings based on model type
+            transcribe_options = {
+                'fp16': (self.device == "cuda"),
+                'task': 'transcribe',
+                'no_speech_threshold': 0.6
+            }
+            
+            # Only add language parameter for non-English models
+            if not self.model_size.endswith('.en'):
+                transcribe_options['language'] = 'en'
+                
+            result = self.model.transcribe(audio_np, **transcribe_options)
             transcription = result['text'].strip()
             
             if self.dynamic_rms:
@@ -222,13 +226,18 @@ class STTService:
                 self.log.warning("Audio too short for transcription")
                 return ""
             
-            # Force English transcription only
-            result = self.model.transcribe(
-                audio_np,
-                fp16=(self.device == "cuda"),
-                language='en',  # Force English language
-                no_speech_threshold=0.6
-            )
+            # Use optimized transcription settings based on model type
+            transcribe_options = {
+                'fp16': (self.device == "cuda"),
+                'task': 'transcribe',
+                'no_speech_threshold': 0.6
+            }
+            
+            # Only add language parameter for non-English models
+            if not self.model_size.endswith('.en'):
+                transcribe_options['language'] = 'en'
+                
+            result = self.model.transcribe(audio_np, **transcribe_options)
             
             transcription = result['text'].strip()
             

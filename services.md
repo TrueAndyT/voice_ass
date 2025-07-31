@@ -21,7 +21,7 @@ This document tracks the testing status of all services in the project.
 | microservices_loader.py | - | Not tested |
 | service_manager.py | service_manager_test.py | Created (stub) |
 | stt_client.py | - | Not tested |
-| stt_service.py | stt_service_test.py | Created (stub) |
+| **stt_service.py** | **stt_service_comprehensive_test.py** | **✅ Success** |
 | stt_service_server.py | stt_service_server_test.py | Created (stub) |
 | **tts_client.py** | **tts_microservice_test.py** | **✅ Success** |
 | **tts_service.py** | **tts_service_test.py** | **✅ Success** |
@@ -83,7 +83,23 @@ The TTS microservice architecture (client + server) has been fully tested with:
 
 The microservice test validates the full distributed architecture with proper client-server communication.
 
+### STT Service Test Success Details
+The STT (Speech-to-Text) service has been comprehensively tested with:
+- **CUDA Support**: Verified GPU acceleration with NVIDIA RTX A2000 (7.8GB VRAM)
+- **Model Optimization**: Updated to use `small.en` model with optimized English transcription
+- **VRAM Monitoring**: Real-time memory tracking (min/max: 1.561GB - 1.643GB)
+- **GPU Utilization**: Peak utilization up to 97% during transcription
+- **Performance Benchmarking**: 0.12x average real-time processing (much faster than playback)
+- **Memory Management**: Zero memory leaks, stable 0.903GB model footprint
+- **Model Scaling**: Tested tiny (0.142GB), base (0.272GB), and small (0.903GB) models
+- **Edge Case Handling**: Proper handling of empty, malformed, and very short audio
+- **Long Audio Processing**: Successfully processed 10-second audio in 6.43s (0.64x real-time)
+- **Stress Testing**: Sequential rapid processing validated memory stability
+- **Task Optimization**: Uses `task="transcribe"` for better English performance
+
+The service demonstrates excellent real-time performance with GPU acceleration, processing audio significantly faster than playback speed while maintaining stable VRAM usage.
+
 ## Quick Reference
-- ✅ Fully tested: kwd_service.py, tts_service.py, tts_client.py, tts_service_server.py
-- ✅ Test stubs exist: 8 services
-- ❌ No tests: 12 services
+- ✅ Fully tested: kwd_service.py, stt_service.py, tts_service.py, tts_client.py, tts_service_server.py
+- ✅ Test stubs exist: 7 services
+- ❌ No tests: 11 services

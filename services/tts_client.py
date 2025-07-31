@@ -42,6 +42,16 @@ class TTSClient:
             self.log.error(error_msg)
             raise TTSException(error_msg) from e
     
+    def stream_speak(self, text_stream):
+        """Stream text to TTS service for speech synthesis."""
+        try:
+            for text_chunk in text_stream:
+                self.speak(text_chunk)
+        except Exception as e:
+            error_msg = f"Streaming TTS communication error: {e}"
+            self.log.error(error_msg)
+            raise TTSException(error_msg) from e
+
     def warmup(self):
         """Send warmup request to TTS microservice."""
         try:

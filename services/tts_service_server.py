@@ -75,6 +75,20 @@ async def speak(request: SpeakRequest):
         log.error(f"Error during TTS speak request: {e}", exc_info=True)
         return {"error": str(e)}, 500
 
+@app.post("/stream-speak")
+async def stream_speak(request: SpeakRequest):
+    """API endpoint to speak text using streaming mode."""
+    if not tts_service:
+        return {"error": "TTS service not initialized"}, 503
+    try:
+        # For now, we'll handle streaming at the service level
+        # In a more advanced implementation, you could accept chunks via WebSocket
+        tts_service.speak(request.text)
+        return {"status": "streaming completed"}
+    except Exception as e:
+        log.error(f"Error during TTS streaming speak request: {e}", exc_info=True)
+        return {"error": str(e)}, 500
+
 @app.post("/warmup")
 async def warmup():
     """API endpoint to warm up the TTS service."""
