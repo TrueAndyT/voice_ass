@@ -28,6 +28,13 @@ class TTSService:
         self.sample_rate = 24000
         self.pipeline = self._build_pipeline()
         self._stream = None
+        
+        # Audio queue system to prevent overlapping speech
+        self._audio_queue = queue.Queue()
+        self._playback_thread = None
+        self._stop_playback = threading.Event()
+        self._playback_lock = threading.Lock()
+        self._start_audio_worker()
 
     def _get_device(self):
         """Determine the compute device (CUDA or CPU) for TTS."""
@@ -50,6 +57,53 @@ class TTSService:
         pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M')
         pipeline.model.to(self.device)
         return pipeline
+    
+    def _start_audio_worker(self):
+        """Start the audio playback worker thread."""
+        if self._playback_thread is None or not self._playback_thread.is_alive():
+            self._stop_playback.clear()
+            self._playback_thread = threading.Thread(target=self._audio_worker, daemon=True)
+            self._playback_thread.start()
+            self.log.debug("Audio playback worker started")
+    
+    def _audio_worker(self):
+        """Worker thread that plays audio chunks sequentially."""
+        try:
+            self._stream = sd.OutputStream(
+                samplerate=self.sample_rate, 
+                channels=1, 
+                dtype='float32', 
+                blocksize=256
+            )
+            self._stream.start()
+            self.log.debug("Audio stream initialized")
+            
+            while not self._stop_playback.is_set():
+                try:
+                    # Get audio data from queue with timeout
+                    audio_data = self._audio_queue.get(timeout=1.0)
+                    if audio_data is None:  # Poison pill to stop worker
+                        break
+                    
+                    if len(audio_data) > 0:
+                        self._stream.write(audio_data)
+                        self.log.debug(f"Played audio chunk with {len(audio_data)} samples")
+                    
+                    self._audio_queue.task_done()
+                    
+                except queue.Empty:
+                    continue  # Continue checking for stop signal
+                except Exception as e:
+                    self.log.error(f"Error in audio worker: {e}")
+                    
+        except Exception as e:
+            self.log.error(f"Audio worker initialization error: {e}")
+        finally:
+            if self._stream:
+                self._stream.stop()
+                self._stream.close()
+                self._stream = None
+            self.log.debug("Audio worker stopped")
 
 
     def speak(self, text=None, chunks=None):
@@ -63,68 +117,15 @@ class TTSService:
         for i, chunk in enumerate(chunks):
             self.log.debug(f"Chunk {i}: '{chunk[:50]}...'" if len(chunk) > 50 else f"Chunk {i}: '{chunk}'")
 
-        def generate_audio(chunk, out_queue):
-            try:
-                # Use torch.no_grad() to reduce memory allocation during inference
-                with torch.no_grad():
-                    generator = self.pipeline(chunk, voice=self.voice_model)
-                    audio_frames = []
-                    for _, _, audio in generator:
-                        if isinstance(audio, torch.Tensor):
-                            audio_np = audio.detach().cpu().numpy()
-                            del audio
-                        else:
-                            audio_np = audio
-
-                        if audio_np.dtype != np.float32:
-                            audio_np = audio_np.astype(np.float32) / np.iinfo(audio_np.dtype).max
-
-                        audio_frames.append(audio_np)
-                    
-                    # Clear generator explicitly and empty cache
-                    del generator
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                    
-                    full_audio = np.concatenate(audio_frames)
-                    out_queue.put(full_audio)
-            except Exception as e:
-                self.log.error(f"TTS generator error: {e}")
-                out_queue.put(None)
-
-        try:
-            self._stream = sd.OutputStream(samplerate=self.sample_rate, channels=1, dtype='float32', blocksize=256)
-            self._stream.start()
-
-            # Process all chunks
+        # Generate audio for all chunks and queue them for sequential playback
+        with self._playback_lock:
             for i, chunk in enumerate(chunks):
-                chunk_queue = queue.Queue()
-                thread = threading.Thread(target=generate_audio, args=(chunk, chunk_queue))
-                thread.start()
-
-                audio_data = chunk_queue.get()
+                audio_data = self._generate_chunk_audio(chunk)
                 if audio_data is not None and len(audio_data) > 0:
-                    self.log.debug(f"Playing chunk {i} with {len(audio_data)} samples")
-                    self._stream.write(audio_data)
+                    self._audio_queue.put(audio_data)
+                    self.log.debug(f"Queued chunk {i} with {len(audio_data)} samples")
                 else:
                     self.log.warning(f"Chunk {i} returned no audio data")
-
-                thread.join()
-
-        except Exception as e:
-            if "cuFFT" in str(e) or "CUDA" in str(e):
-                self.log.warning("cuFFT or CUDA crash detected, attempting TTS pipeline recovery...")
-                try:
-                    self.pipeline = self._build_pipeline()
-                    self.log.info("TTS pipeline recovered successfully")
-                except Exception as rebuild_error:
-                    self.log.error(f"Failed to rebuild TTS pipeline: {rebuild_error}")
-            self.log.error(f"TTS playback error: {e}")
-        finally:
-            if self._stream:
-                self._stream.stop()
-                self._stream.close()
-                self._stream = None
 
     def _segment_text(self, text, max_chars=200):  # Reduced for better memory management
         # First try to split by sentences
@@ -187,71 +188,74 @@ class TTSService:
     def stream_speak(self, chunk_iterator):
         """Speak using streaming chunks."""
         self.log.info("Starting streaming TTS...")
-        try:
-            self._stream = sd.OutputStream(samplerate=self.sample_rate, channels=1, dtype='float32', blocksize=256)
-            self._stream.start()
-
+        
+        with self._playback_lock:
             for chunk in chunk_iterator:
                 self.log.debug(f"Received text chunk: {chunk[:50]}...")
                 audio_data = self._generate_chunk_audio(chunk)
                 if audio_data is not None and len(audio_data) > 0:
-                    self.log.debug(f"Playing chunk with {len(audio_data)} samples")
-                    self._stream.write(audio_data)
+                    self._audio_queue.put(audio_data)
+                    self.log.debug(f"Queued streaming chunk with {len(audio_data)} samples")
                 else:
-                    self.log.warning("Chunk returned no audio data")
-
-        except Exception as e:
-            self.log.error(f"TTS streaming playback error: {e}")
-        finally:
-            if self._stream:
-                self._stream.stop()
-                self._stream.close()
-                self._stream = None
+                    self.log.warning("Streaming chunk returned no audio data")
 
     def _generate_chunk_audio(self, chunk):
         """Generate audio for a text chunk."""
-        def generate_audio(chunk, out_queue):
-            try:
-                # Use torch.no_grad() to reduce memory allocation during inference
-                with torch.no_grad():
-                    generator = self.pipeline(chunk, voice=self.voice_model)
-                    audio_frames = []
-                    for _, _, audio in generator:
-                        if isinstance(audio, torch.Tensor):
-                            audio_np = audio.detach().cpu().numpy()
-                            del audio
-                        else:
-                            audio_np = audio
+        try:
+            # Use torch.no_grad() to reduce memory allocation during inference
+            with torch.no_grad():
+                generator = self.pipeline(chunk, voice=self.voice_model)
+                audio_frames = []
+                for _, _, audio in generator:
+                    if isinstance(audio, torch.Tensor):
+                        audio_np = audio.detach().cpu().numpy()
+                        del audio
+                    else:
+                        audio_np = audio
 
-                        if audio_np.dtype != np.float32:
-                            audio_np = audio_np.astype(np.float32) / np.iinfo(audio_np.dtype).max
+                    if audio_np.dtype != np.float32:
+                        audio_np = audio_np.astype(np.float32) / np.iinfo(audio_np.dtype).max
 
-                        audio_frames.append(audio_np)
-                    
-                    # Clear generator explicitly and empty cache
-                    del generator
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                    
+                    audio_frames.append(audio_np)
+                
+                # Clear generator explicitly and empty cache
+                del generator
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                if audio_frames:
                     full_audio = np.concatenate(audio_frames)
-                    out_queue.put(full_audio)
-            except Exception as e:
-                self.log.error(f"TTS generator error: {e}")
-                out_queue.put(None)
-
-        chunk_queue = queue.Queue()
-        thread = threading.Thread(target=generate_audio, args=(chunk, chunk_queue))
-        thread.start()
-
-        audio_data = chunk_queue.get()
-        thread.join()
-
-        return audio_data
+                    return full_audio
+                else:
+                    return None
+                    
+        except Exception as e:
+            self.log.error(f"TTS generator error: {e}")
+            return None
 
     def stop(self):
         """Immediately stop audio playback"""
-        if self._stream:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+        with self._playback_lock:
+            # Clear the audio queue
+            while not self._audio_queue.empty():
+                try:
+                    self._audio_queue.get_nowait()
+                    self._audio_queue.task_done()
+                except queue.Empty:
+                    break
+            
+            # Stop the worker thread
+            self._stop_playback.set()
+            self._audio_queue.put(None)  # Poison pill
+            
+            if self._playback_thread and self._playback_thread.is_alive():
+                self._playback_thread.join(timeout=2.0)
+            
             self.log.info("TTS playback stopped")
+    
+    def __del__(self):
+        """Cleanup when service is destroyed."""
+        try:
+            self.stop()
+        except:
+            pass  # Ignore errors during cleanup

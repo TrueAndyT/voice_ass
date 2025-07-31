@@ -24,6 +24,7 @@ os.open(os.devnull, os.O_RDWR)
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
+from typing import List
 from services.tts_service import TTSService
 from services.logger import app_logger
 
@@ -75,18 +76,34 @@ async def speak(request: SpeakRequest):
         log.error(f"Error during TTS speak request: {e}", exc_info=True)
         return {"error": str(e)}, 500
 
+class StreamSpeakRequest(BaseModel):
+    text_chunks: List[str]
+    
 @app.post("/stream-speak")
-async def stream_speak(request: SpeakRequest):
-    """API endpoint to speak text using streaming mode."""
+async def stream_speak(request: StreamSpeakRequest):
+    """API endpoint to speak text chunks using streaming mode."""
     if not tts_service:
         return {"error": "TTS service not initialized"}, 503
     try:
-        # For now, we'll handle streaming at the service level
-        # In a more advanced implementation, you could accept chunks via WebSocket
-        tts_service.speak(request.text)
-        return {"status": "streaming completed"}
+        # Use the streaming interface with pre-chunked text
+        tts_service.speak(chunks=request.text_chunks)
+        return {"status": "streaming completed", "chunks_processed": len(request.text_chunks)}
     except Exception as e:
         log.error(f"Error during TTS streaming speak request: {e}", exc_info=True)
+        return {"error": str(e)}, 500
+
+@app.post("/speak-chunk")
+async def speak_chunk(request: SpeakRequest):
+    """API endpoint to speak a single text chunk immediately."""
+    if not tts_service:
+        return {"error": "TTS service not initialized"}, 503
+    try:
+        # Break text into smaller chunks for immediate processing
+        chunks = tts_service._segment_text(request.text, max_chars=150)
+        tts_service.speak(chunks=chunks)
+        return {"status": "chunk completed", "chunks_generated": len(chunks)}
+    except Exception as e:
+        log.error(f"Error during TTS chunk speak request: {e}", exc_info=True)
         return {"error": str(e)}, 500
 
 @app.post("/warmup")
@@ -102,5 +119,19 @@ async def warmup():
         return {"error": str(e)}, 500
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    # Configure uvicorn logging to reduce HTTP request noise
+    import logging
+    
+    # Set uvicorn access log level to WARNING to hide successful requests
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.setLevel(logging.WARNING)
+    
+    # Run server with reduced logging
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8001,
+        log_level="info",  # Keep general uvicorn logs at info
+        access_log=False   # Disable access logging completely
+    )
 

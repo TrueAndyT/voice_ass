@@ -219,3 +219,37 @@ class LLMService:
             self.log.critical(error_message, exc_info=True)
             self._append_to_dialog_log("ASSISTANT_ERROR", error_message)
             return f"Error: {error_message}", {}
+    
+    def get_response_stream(self, prompt):
+        """Get streaming response from LLM (fallback to non-streaming for local service)."""
+        # For the local LLMService, we'll simulate streaming by yielding the complete response
+        # This ensures compatibility with the streaming interface
+        try:
+            response, metrics = self.get_response(prompt)
+            
+            # Simulate streaming chunks for compatibility
+            import re
+            sentences = re.split(r'(?<=[.!?])\s+', response)
+            
+            for sentence in sentences:
+                if sentence.strip():
+                    yield {
+                        'type': 'chunk',
+                        'content': sentence + ' ',
+                        'is_final': False
+                    }
+            
+            # Final completion
+            yield {
+                'type': 'complete',
+                'content': response,
+                'metrics': metrics,
+                'is_final': True
+            }
+            
+        except Exception as e:
+            yield {
+                'type': 'error',
+                'content': str(e),
+                'is_final': True
+            }

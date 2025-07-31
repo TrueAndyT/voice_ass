@@ -76,5 +76,19 @@ async def transcribe(audio: UploadFile = File(...)):
         return {"error": str(e)}, 500
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    # Configure uvicorn logging to reduce HTTP request noise
+    import logging
+    
+    # Set uvicorn access log level to WARNING to hide successful requests
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.setLevel(logging.WARNING)
+    
+    # Run server with reduced logging
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8002,
+        log_level="info",  # Keep general uvicorn logs at info
+        access_log=False   # Disable access logging completely
+    )
 

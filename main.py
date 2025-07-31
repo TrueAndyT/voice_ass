@@ -220,19 +220,19 @@ def handle_wake_word_interaction(stt_service, llm_service, tts_service, log):
         log.info(f"LLM Query: {transcription}")
         
         try:
-            # Try to use streaming LLM client if available
+            # Try to use streaming LLM to TTS integration
             from services.tts_streaming_client import create_llm_tts_bridge
             bridge = create_llm_tts_bridge()
             
             # Stream LLM response directly to TTS
             llm_stream = llm_service.get_response_stream(transcription)
-            bridge.stream_llm_to_tts(llm_stream, chunk_size=100)
+            bridge.stream_llm_to_tts(llm_stream, chunk_size=80)
             
             log.info("Streaming LLM to TTS completed")
             
-        except (ImportError, AttributeError, Exception) as e:
-            # Fallback to traditional approach if streaming not available
-            log.warning(f"Streaming not available, using traditional approach: {e}")
+        except Exception as streaming_error:
+            # Fallback to traditional approach if streaming fails
+            log.warning(f"Streaming failed, using traditional approach: {streaming_error}")
             
             llm_result = llm_service.get_response(transcription)
             

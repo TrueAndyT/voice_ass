@@ -74,10 +74,51 @@ class LLMClient:
             self.log.error(error_msg)
             raise LLMException(error_msg) from e
     
+    def get_response_stream(self, prompt):
+        """Get streaming response from LLM microservice."""
+        try:
+            import json
+            import sseclient
+            
+            response = requests.post(
+                f"{self.base_url}/chat/stream",
+                json={
+                    "prompt": prompt,
+                    "chunk_threshold": 50,
+                    "sentence_boundary": True
+                },
+                stream=True,
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                client = sseclient.SSEClient(response)
+                
+                for event in client.events():
+                    if event.data:
+                        try:
+                            data = json.loads(event.data)
+                            yield data
+                        except json.JSONDecodeError as e:
+                            self.log.warning(f"Failed to parse SSE data: {e}")
+                            continue
+            else:
+                error_msg = f"LLM streaming request failed: {response.status_code} - {response.text}"
+                self.log.error(error_msg)
+                raise LLMException(error_msg)
+                
+        except requests.exceptions.RequestException as e:
+            error_msg = f"LLM service streaming communication error: {e}"
+            self.log.error(error_msg)
+            raise LLMException(error_msg) from e
+    
     def health_check(self):
         """Check if the LLM microservice is responsive."""
         try:
-            response = requests.get(f"{self.base_url}/docs", timeout=5)
-            return response.status_code == 200
+            response = requests.get(f"{self.base_url}/health", timeout=5)
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("status") == "healthy"
+            return False
         except:
             return False

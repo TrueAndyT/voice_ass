@@ -46,7 +46,7 @@ def load_services_microservices():
         microservices = [
             ("tts_service", "services.tts_service_server:app", 8001),
             ("stt_service", "services.stt_service_server:app", 8002),
-            ("llm_service", "services.llm_service_server:app", 8003)
+            ("llm_service", "services.llm_streaming_server:app", 8003)  # Use streaming server
         ]
         
         for service_name, app_path, port in microservices:

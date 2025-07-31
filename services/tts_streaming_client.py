@@ -53,42 +53,51 @@ class TTSStreamingClient:
             chunk_size: Minimum character length before sending to TTS
         """
         try:
-            buffer = ""
-            chunk_count = 0
+            # Accumulate ALL text first, then send as single request
+            accumulated_text = ""
             
             self.log.info("Starting streaming TTS...")
             
+            # Collect all text chunks
             for text_chunk in text_stream:
-                if not text_chunk:
-                    continue
-                    
-                buffer += text_chunk
-                
-                # Send buffer to TTS when it reaches chunk_size or contains sentence endings
-                if (len(buffer) >= chunk_size or 
-                    any(punct in buffer for punct in ['.', '!', '?', '\n'])):
-                    
-                    # Find the best break point
-                    break_point = self._find_break_point(buffer)
-                    if break_point > 0:
-                        chunk_to_speak = buffer[:break_point].strip()
-                        buffer = buffer[break_point:].strip()
-                        
-                        if chunk_to_speak:
-                            self.log.debug(f"Streaming chunk {chunk_count}: '{chunk_to_speak[:50]}...'")
-                            self.speak(chunk_to_speak)
-                            chunk_count += 1
+                if text_chunk:
+                    accumulated_text += text_chunk
             
-            # Speak any remaining text in buffer
-            if buffer.strip():
-                self.log.debug(f"Final chunk {chunk_count}: '{buffer[:50]}...'")
-                self.speak(buffer.strip())
-                chunk_count += 1
-            
-            self.log.info(f"Streaming TTS completed with {chunk_count} chunks")
+            # Send all accumulated text as ONE request to prevent double speaking
+            if accumulated_text.strip():
+                self.log.debug(f"Sending complete text to TTS: {len(accumulated_text)} chars")
+                self.speak(accumulated_text.strip())
+                self.log.info("Streaming TTS completed with 1 unified request")
+            else:
+                self.log.warning("No text accumulated for TTS")
                 
         except Exception as e:
             error_msg = f"Streaming TTS communication error: {e}"
+            self.log.error(error_msg)
+            raise TTSException(error_msg) from e
+    
+    def _speak_chunk(self, text: str):
+        """Send a single text chunk to TTS service using only existing endpoints."""
+        # ONLY use the /speak endpoint that actually exists
+        try:
+            start_time = time.time()
+            response = requests.post(
+                f"{self.base_url}/speak",
+                json={"text": text},
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                duration = time.time() - start_time
+                self.log.debug(f"TTS chunk (via speak) request completed in {duration:.2f}s")
+                return response.json()
+            else:
+                error_msg = f"TTS speak request failed: {response.status_code} - {response.text}"
+                self.log.error(error_msg)
+                raise TTSException(error_msg)
+                
+        except requests.exceptions.RequestException as e:
+            error_msg = f"TTS service communication error: {e}"
             self.log.error(error_msg)
             raise TTSException(error_msg) from e
     
@@ -182,12 +191,28 @@ class LLMToTTSStreamingBridge:
         def text_generator():
             for chunk in llm_stream:
                 if isinstance(chunk, dict):
-                    if text_key in chunk and chunk[text_key]:
-                        yield chunk[text_key]
+                    chunk_type = chunk.get('type')
+                    
+                    # Handle different chunk types from LLM streaming
+                    if chunk_type == 'chunk' and text_key in chunk and chunk[text_key]:
+                        content = chunk[text_key]
+                        self.log.debug(f"Streaming chunk: '{content[:50]}...'" if len(content) > 50 else f"Streaming chunk: '{content}'")
+                        yield content
+                    elif chunk_type == 'complete' and text_key in chunk and chunk[text_key]:
+                        # Final chunk if streaming didn't send individual chunks
+                        content = chunk[text_key]
+                        self.log.debug(f"Final complete response: {len(content)} chars")
+                        yield content
+                    elif chunk_type == 'error':
+                        error_msg = chunk.get(text_key, 'Unknown streaming error')
+                        self.log.error(f"LLM streaming error: {error_msg}")
+                        break
+                    
                     # Log metrics if available
                     if "metrics" in chunk:
                         metrics = chunk["metrics"]
                         self.log.debug(f"LLM metrics: {metrics}")
+                        
                 elif isinstance(chunk, str) and chunk:
                     yield chunk
         
