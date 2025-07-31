@@ -19,19 +19,40 @@ import webrtcvad
 import numpy as np
 import threading
 
+# import zmq
+
 # Import from the services package
 from services.microservices_loader import load_services_microservices
 from services.kwd_service import KWDService
 from services.logger import app_logger
 from services.memory_logger import MemoryLogger
 from services.dynamic_rms_service import DynamicRMSService
-from services.dashboard import DashboardService
+# from services.dashboard_service import DashboardService
 from services.exceptions import (
     MicrophoneException, 
     ServiceInitializationException, 
     AudioException,
     VoiceAssistantException
 )
+
+# class DashboardPublisher:
+#     def __init__(self, port=5555):
+#         self.context = zmq.Context()
+#         self.socket = self.context.socket(zmq.PUB)
+#         self.socket.bind(f"tcp://*:{port}")
+#         # Give ZeroMQ time to establish the connection
+#         time.sleep(0.5)
+
+#     def publish(self, data):
+#         try:
+#             self.socket.send_json(data)
+#             print(f"[PUBLISHER] Sent: {data}")  # Debug
+#         except Exception as e:
+#             print(f"[PUBLISHER] Error sending: {e}")
+
+#     def close(self):
+#         self.socket.close()
+#         self.context.term()
 
 def play_beep(log=None):
     """Play the wake word detection sound."""
@@ -181,12 +202,12 @@ def record_audio_for_transcription(stream, timeout_ms=3000, log=None):
     return b''.join(recorded_frames)
 
 
-def handle_wake_word_interaction(stt_service, llm_service, tts_service, log, dashboard=None):
+def handle_wake_word_interaction(stt_service, llm_service, tts_service, log, publisher=None):
     """Handle the interaction after wake word detection."""
     try:
         log.info("Starting transcription after wake word detection")
-        if dashboard:
-            dashboard.update_state("Recording")
+        # if publisher:
+        #     publisher.publish({"state": "Recording"})
         
         # Record audio for transcription
         with audio_stream_manager(
@@ -196,29 +217,29 @@ def handle_wake_word_interaction(stt_service, llm_service, tts_service, log, das
         
         if not audio_data:
             log.warning("No audio data recorded")
-            if dashboard:
-                dashboard.update_state("Listening")
+            # if publisher:
+            #     publisher.publish({"state": "Listening"})
             return
             
-        if dashboard:
-            dashboard.update_state("Processing")
+        # if publisher:
+        #     publisher.publish({"state": "Processing"})
             
         transcription = stt_service.transcribe_audio_bytes(audio_data)
         
         if not transcription:
             log.warning("STT service returned no transcription")
-            if dashboard:
-                dashboard.update_state("Listening")
+            # if publisher:
+            #     publisher.publish({"state": "Listening"})
             return
         
         speech_end_time = time.time()
         log.info(f"Transcription received: {transcription}")
-        if dashboard:
-            dashboard.update_stt(transcription)
+        # if publisher:
+        #     publisher.publish({"stt_output": transcription})
         
         # Process with LLM
-        if dashboard:
-            dashboard.update_state("Thinking")
+        # if publisher:
+        #     publisher.publish({"state": "Thinking"})
             
         llm_start_time = time.time()
         llm_result = llm_service.get_response(transcription)
@@ -233,8 +254,8 @@ def handle_wake_word_interaction(stt_service, llm_service, tts_service, log, das
         
         # Extract intent from the LLM service
         intent = llm_service.intent_detector.detect(transcription)
-        if dashboard:
-            dashboard.update_intent(intent)
+        # if publisher:
+        #     publisher.publish({"intent": intent})
         
         # Use Ollama's native metrics or fallback to calculated ones
         llm_duration = llm_end_time - llm_start_time
@@ -268,10 +289,10 @@ def handle_wake_word_interaction(stt_service, llm_service, tts_service, log, das
         )
         
         # Speak response
-        if dashboard:
-            dashboard.update_state("Speaking")
-            dashboard.update_llm(llm_response)
-            dashboard.update_performance(perf_data)
+        # if publisher:
+        #     publisher.publish({"state": "Speaking"})
+        #     publisher.publish({"llm_output": llm_response})
+        #     publisher.publish({"performance": perf_data})
             
         tts_start_time = time.time()
         log.info(f"LLM Response: {llm_response}")
@@ -279,8 +300,8 @@ def handle_wake_word_interaction(stt_service, llm_service, tts_service, log, das
         
         speech_to_tts_time = tts_start_time - speech_end_time
         perf_data["Speech→TTS"] = f"{speech_to_tts_time:.2f}s"
-        if dashboard:
-            dashboard.update_performance(perf_data)
+        # if publisher:
+        #     publisher.publish({"performance": perf_data})
             
         app_logger.log_performance(
             "speech_to_tts", 
@@ -288,24 +309,24 @@ def handle_wake_word_interaction(stt_service, llm_service, tts_service, log, das
         )
         
         # Handle follow-up conversation
-        handle_followup_conversation(stt_service, llm_service, tts_service, log, dashboard)
+        handle_followup_conversation(stt_service, llm_service, tts_service, log, publisher)
         
         log.info("Conversation ended - listening for wake word again")
-        if dashboard:
-            dashboard.update_state("Listening")
-            dashboard.update_stt("")
-            dashboard.update_llm("")
-            dashboard.update_intent("N/A")
-        play_beep(sound_type="end", log=log)
+        # if publisher:
+        #     publisher.publish({"state": "Listening"})
+        #     publisher.publish({"stt_output": ""})
+        #     publisher.publish({"llm_output": ""})
+        #     publisher.publish({"intent": "N/A"})
+        # play_beep(sound_type="end", log=log)
         
     except Exception as e:
         log.error(f"Error during wake word interaction: {e}", exc_info=True)
-        if dashboard:
-            dashboard.update_state("Error")
+        # if publisher:
+        #     publisher.publish({"state": "Error"})
         # Continue running - don't crash the main loop
 
 
-def handle_followup_conversation(stt_service, llm_service, tts_service, log, dashboard=None):
+def handle_followup_conversation(stt_service, llm_service, tts_service, log, publisher=None):
     """Handle the follow-up conversation loop."""
     while True:
         try:
@@ -436,12 +457,21 @@ def main():
         except Exception as e:
             log.warning(f"Could not announce readiness: {e}")
             
-        # Initialize and start the dashboard
-        dashboard = DashboardService()
-        dashboard.start()
-        dashboard.update_performance({"Startup": f"{startup_duration:.2f}s"})
-        dashboard.update_state("Listening")
-        dashboard.update_intent("N/A")  # Initialize with proper intent
+        # # Start dashboard publisher
+        # publisher = DashboardPublisher()
+        
+        # # Start dashboard service as subprocess
+        # dashboard = subprocess.Popen([sys.executable, "-m", "services.dashboard_service"])
+        
+        # # Give dashboard time to connect before sending initial messages
+        # time.sleep(1.0)
+        
+        # # Send initial state
+        # publisher.publish({"performance": {"Startup": f"{startup_duration:.2f}s"}})
+        # publisher.publish({"state": "Listening"})
+        # publisher.publish({"intent": "N/A"})
+        
+        publisher = None  # Set to None so the rest of the code works
         
         log.info("Voice assistant ready - listening for wake word...")
         
@@ -462,25 +492,25 @@ def main():
                     )
                     # Update dynamic RMS threshold with the same audio data
                     dynamic_rms.update_threshold(audio_chunk)
-                    if dashboard:
-                        # Calculate normalized RMS for meaningful display
-                        audio_data = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32)
-                        # Normalize to -1.0 to 1.0 range
-                        normalized_audio = audio_data / 32768.0
-                        current_rms = np.sqrt(np.mean(normalized_audio**2))
-                        # Scale to percentage for display
-                        rms_percentage = current_rms * 100
-                        threshold_percentage = dynamic_rms.get_threshold() * 100 if dynamic_rms.get_threshold() else 0
-                        dashboard.update_audio_level(rms_percentage, threshold_percentage)
-                        
-                        # Update system resources and performance periodically
-                        import psutil
-                        cpu_percent = psutil.cpu_percent()
-                        memory_info = psutil.virtual_memory()
-                        dashboard.update_performance({
-                            "CPU Usage": f"{cpu_percent:.1f}%",
-                            "Memory": f"{memory_info.percent:.1f}%"
-                        })
+                    # if publisher:
+                    #     # Calculate normalized RMS for meaningful display
+                    #     audio_data = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32)
+                    #     # Normalize to -1.0 to 1.0 range
+                    #     normalized_audio = audio_data / 32768.0
+                    #     current_rms = np.sqrt(np.mean(normalized_audio**2))
+                    #     # Scale to percentage for display
+                    #     rms_percentage = current_rms * 100
+                    #     threshold_percentage = dynamic_rms.get_threshold() * 100 if dynamic_rms.get_threshold() else 0
+                    #     publisher.publish({"audio_level": f"{rms_percentage:.2f} / {threshold_percentage:.2f}"})
+                    #     
+                    #     # Update system resources and performance periodically
+                    #     import psutil
+                    #     cpu_percent = psutil.cpu_percent()
+                    #     memory_info = psutil.virtual_memory()
+                    #     publisher.publish({"performance": {
+                    #         "CPU Usage": f"{cpu_percent:.1f}%",
+                    #         "Memory": f"{memory_info.percent:.1f}%"
+                    #     }})
                     
                     # Process audio with wake word detection
                     prediction, utterance_buffer = kwd_service.process_audio(audio_chunk)
@@ -489,12 +519,12 @@ def main():
                     if prediction:
                         log.info(f"Wake word detected! Confidence: {prediction}")
                         # Don't update intent here - let the wake word interaction handle it
-                        handle_wake_word_interaction(stt_service, llm_service, tts_service, log, dashboard)
+                        handle_wake_word_interaction(stt_service, llm_service, tts_service, log, publisher)
                             
                 except AudioException as e:
                     log.error(f"Audio processing error: {e}")
-                    if dashboard:
-                        dashboard.update_state("Audio Error")
+                    # if publisher:
+                    #     publisher.publish({"state": "Audio Error"})
                     if not e.recoverable:
                         raise
                     # Continue for recoverable audio errors
@@ -502,8 +532,8 @@ def main():
                     
                 except Exception as e:
                     log.error(f"Unexpected error in main loop: {e}", exc_info=True)
-                    if dashboard:
-                        dashboard.update_state("Error")
+                    # if publisher:
+                    #     publisher.publish({"state": "Error"})
                     # Continue running - log error but don't crash
                     time.sleep(0.1)
     
@@ -526,8 +556,11 @@ def main():
         
     finally:
         # Cleanup resources
-        if 'dashboard' in locals():
-            dashboard.stop()
+        # if 'publisher' in locals() and publisher is not None:
+        #     publisher.close()
+        # if 'dashboard' in locals() and dashboard.poll() is None:
+        #     dashboard.terminate()
+        #     dashboard.wait()
         if mem_logger:
             mem_logger.stop()
         if service_manager:
