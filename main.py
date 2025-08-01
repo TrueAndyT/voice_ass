@@ -25,6 +25,7 @@ from services.kwd_service import KWDService
 from services.logger import app_logger
 from services.memory_logger import MemoryLogger
 from services.dynamic_rms_service import DynamicRMSService
+from services.llm_streaming_client import StreamingTTSIntegration
 from services.exceptions import (
     MicrophoneException, 
     ServiceInitializationException, 
@@ -144,7 +145,7 @@ def record_audio_for_transcription(stream, timeout_ms=3000, log=None):
     MAX_INT16 = 32767.0
     
     if log:
-        log.debug("Recording audio for transcription...")
+        log.info("Recording audio for transcription...")
     
     while True:
         try:
@@ -184,101 +185,49 @@ def handle_wake_word_interaction(stt_service, llm_service, tts_service, log):
     """Handle the interaction after wake word detection."""
     try:
         log.info("Starting transcription after wake word detection")
-        # if publisher:
-        #     publisher.publish({"state": "Recording"})
         
-        # Record audio for transcription
         with audio_stream_manager(
-            pyaudio.paInt16, 1, 16000, int(16000 * 0.03)  # 30ms frames
+            pyaudio.paInt16, 1, 16000, int(16000 * 0.03)
         ) as stream:
             audio_data = record_audio_for_transcription(stream, timeout_ms=3000, log=log)
         
         if not audio_data:
             log.warning("No audio data recorded")
-            # if publisher:
-            #     publisher.publish({"state": "Listening"})
             return
-            
-        # if publisher:
-        #     publisher.publish({"state": "Processing"})
             
         transcription = stt_service.transcribe_audio_bytes(audio_data)
         
         if not transcription:
             log.warning("STT service returned no transcription")
-            # if publisher:
-            #     publisher.publish({"state": "Listening"})
             return
         
         speech_end_time = time.time()
         log.info(f"Transcription received: {transcription}")
-        # if publisher:
-        #     publisher.publish({"stt_output": transcription})
         
-        # Process with streaming LLM to TTS
         tts_start_time = time.time()
         log.info(f"LLM Query: {transcription}")
         
         try:
-            # Try to use streaming LLM client if available
-            from services.tts_streaming_client import create_llm_tts_bridge
-            bridge = create_llm_tts_bridge()
-            
-            # Stream LLM response directly to TTS
-            llm_stream = llm_service.get_response_stream(transcription)
-            bridge.stream_llm_to_tts(llm_stream, chunk_size=100)
-            
+            # ✅ Replaced bridge with StreamingTTSIntegration
+            integration = StreamingTTSIntegration(llm_service, tts_service, min_chunk_size=80)
+            integration.speak_streaming_response(transcription)
             log.info("Streaming LLM to TTS completed")
             
-        except (ImportError, AttributeError, Exception) as e:
-            # Fallback to traditional approach if streaming not available
-            log.warning(f"Streaming not available, using traditional approach: {e}")
-            
+        except Exception as e:
+            log.warning(f"Streaming failed, falling back: {e}")
             llm_result = llm_service.get_response(transcription)
-            
-            # Handle both tuple and single return values for backward compatibility
-            if isinstance(llm_result, tuple):
-                llm_response, ollama_metrics = llm_result
-            else:
-                llm_response = llm_result
-                ollama_metrics = {}
-            
-            log.info(f"LLM Response: {llm_response}")
-            
-            # Use streaming TTS client for chunked playback
-            try:
-                from services.tts_streaming_client import create_streaming_tts_client
-                streaming_tts = create_streaming_tts_client()
-                streaming_tts.speak(llm_response)
-            except Exception as tts_error:
-                log.warning(f"Streaming TTS failed, using regular TTS: {tts_error}")
-                tts_service.speak(llm_response)
+            llm_response = llm_result[0] if isinstance(llm_result, tuple) else llm_result
+            tts_service.speak(llm_response)
 
-        # Log performance metrics
         speech_to_tts_time = tts_start_time - speech_end_time
         log.info(f"Speech→TTS latency: {speech_to_tts_time:.2f}s")
+        app_logger.log_performance("speech_to_tts", speech_to_tts_time)
         
-        app_logger.log_performance(
-            "speech_to_tts",
-            speech_to_tts_time
-        )
-        
-        # Handle follow-up conversation
         handle_followup_conversation(stt_service, llm_service, tts_service, log)
-        
         log.info("Conversation ended - listening for wake word again")
-        # if publisher:
-        #     publisher.publish({"state": "Listening"})
-        #     publisher.publish({"stt_output": ""})
-        #     publisher.publish({"llm_output": ""})
-        #     publisher.publish({"intent": "N/A"})
-        # play_beep(sound_type="end", log=log)
         
     except Exception as e:
         log.error(f"Error during wake word interaction: {e}", exc_info=True)
-        # if publisher:
-        #     publisher.publish({"state": "Error"})
-        # Continue running - don't crash the main loop
 
 
 def handle_followup_conversation(stt_service, llm_service, tts_service, log):
@@ -287,9 +236,8 @@ def handle_followup_conversation(stt_service, llm_service, tts_service, log):
         try:
             log.debug("Listening for follow-up...")
             
-            # Record audio for follow-up transcription
             with audio_stream_manager(
-                pyaudio.paInt16, 1, 16000, int(16000 * 0.03)  # 30ms frames
+                pyaudio.paInt16, 1, 16000, int(16000 * 0.03)
             ) as stream:
                 audio_data = record_audio_for_transcription(stream, timeout_ms=4000, log=log)
             
@@ -305,59 +253,25 @@ def handle_followup_conversation(stt_service, llm_service, tts_service, log):
                 
             speech_end_time = time.time()
             log.info(f"Follow-up transcription: {follow_up}")
-            
             tts_start_time = time.time()
             
             try:
-                # Try to use streaming for follow-up responses too
-                from services.tts_streaming_client import create_llm_tts_bridge
-                bridge = create_llm_tts_bridge()
-                
-                # Stream LLM response directly to TTS
-                llm_stream = llm_service.get_response_stream(follow_up)
-                bridge.stream_llm_to_tts(llm_stream, chunk_size=80)
-                
+                # ✅ Replaced bridge with StreamingTTSIntegration
+                integration = StreamingTTSIntegration(llm_service, tts_service, min_chunk_size=80)
+                integration.speak_streaming_response(follow_up)
                 log.info("Streaming follow-up LLM to TTS completed")
                 
-            except (ImportError, AttributeError, Exception) as e:
-                # Fallback to traditional approach
-                log.debug(f"Follow-up streaming not available, using traditional approach: {e}")
-                
-                llm_start_time = time.time()
+            except Exception as e:
+                log.debug(f"Follow-up streaming failed, fallback: {e}")
                 llm_result = llm_service.get_response(follow_up)
-                llm_end_time = time.time()
-                
-                # Handle both tuple and single return values for backward compatibility
-                if isinstance(llm_result, tuple):
-                    llm_response, _ = llm_result  # Ignore metrics in follow-up for now
-                else:
-                    llm_response = llm_result
-                
-                app_logger.log_performance(
-                    "followup_llm_response", 
-                    llm_end_time - llm_start_time,
-                    {"input_length": len(follow_up)}
-                )
-                
-                log.info(f"LLM Response: {llm_response}")
-                
-                # Try streaming TTS client, fallback to regular TTS
-                try:
-                    from services.tts_streaming_client import create_streaming_tts_client
-                    streaming_tts = create_streaming_tts_client()
-                    streaming_tts.speak(llm_response)
-                except Exception as tts_error:
-                    log.debug(f"Streaming TTS failed, using regular TTS: {tts_error}")
-                    tts_service.speak(llm_response)
+                llm_response = llm_result[0] if isinstance(llm_result, tuple) else llm_result
+                tts_service.speak(llm_response)
             
-            app_logger.log_performance(
-                "followup_speech_to_tts", 
-                tts_start_time - speech_end_time
-            )
+            app_logger.log_performance("followup_speech_to_tts", tts_start_time - speech_end_time)
             
         except Exception as e:
             log.error(f"Error during follow-up conversation: {e}", exc_info=True)
-            break  # Exit follow-up loop on error
+            break
 
 
 def run_indexing():

@@ -6,7 +6,7 @@ import time
 import requests
 from openwakeword.model import Model
 from .stt_client import STTClient
-from .llm_client import LLMClient
+from .llm_streaming_client import StreamingLLMClient
 from .tts_client import TTSClient
 from .dynamic_rms_service import DynamicRMSService
 from .service_manager import ServiceManager
@@ -46,7 +46,7 @@ def load_services_microservices():
         microservices = [
             ("tts_service", "services.tts_service_server:app", 8001),
             ("stt_service", "services.stt_service_server:app", 8002),
-            ("llm_service", "services.llm_service_server:app", 8003)
+            ("llm_service", "services.llm_streaming_server:app", 8003)
         ]
         
         for service_name, app_path, port in microservices:
@@ -95,7 +95,7 @@ def load_services_microservices():
         services["stt_service"] = stt_service
         
         # LLM Client
-        llm_service = LLMClient(port=8003)
+        llm_service = StreamingLLMClient(port=8003)
         for attempt in range(30):
             if llm_service.health_check():
                 log.debug("LLM microservice is ready")
