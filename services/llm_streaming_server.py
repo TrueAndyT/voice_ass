@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import ollama
 from services.llm_service import LLMService
-from services.logger import app_logger
+from services.utils.logger import app_logger
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -45,7 +45,7 @@ async def startup_event():
     global llm_service
     log.info("Starting streaming LLM microservice...")
     try:
-        llm_service = LLMService(model='alexa-4k')  # Use optimized 4K model
+        llm_service = LLMService(model='llama3:8b-q4')
         log.info("Streaming LLM microservice started successfully")
     except Exception as e:
         log.error(f"Failed to start streaming LLM microservice: {e}", exc_info=True)

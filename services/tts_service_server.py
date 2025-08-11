@@ -25,7 +25,7 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 from services.tts_service import TTSService
-from services.logger import app_logger
+from services.utils.logger import app_logger
 
 # Restore stderr and stdout after imports
 os.dup2(original_stderr, 2)

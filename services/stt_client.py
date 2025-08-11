@@ -7,7 +7,7 @@ Provides the same interface as the original STT service but communicates via HTT
 import requests
 import time
 import io
-from .logger import app_logger
+from .utils.logger import app_logger
 from .exceptions import STTException
 
 class STTClient:

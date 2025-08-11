@@ -9,9 +9,9 @@ import time
 import json
 import sseclient
 from typing import Iterator, Dict, Any, Optional, Callable
-from .logger import app_logger
+from .utils.logger import app_logger
 from .exceptions import LLMException
-from .intent_detector import IntentDetector
+from .handlers.intent_detector import IntentDetector
 
 
 class StreamingLLMClient:

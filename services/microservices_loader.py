@@ -1,5 +1,5 @@
 import torch
-import webrtcvad
+from openwakeword import VAD
 import numpy as np
 import os
 import time
@@ -10,7 +10,7 @@ from .llm_streaming_client import StreamingLLMClient
 from .tts_client import TTSClient
 from .dynamic_rms_service import DynamicRMSService
 from .service_manager import ServiceManager
-from .logger import app_logger
+from .utils.logger import app_logger
 from .exceptions import ServiceInitializationException, ResourceException
 
 def load_services_microservices():
@@ -24,7 +24,7 @@ def load_services_microservices():
         
         # Initialize VAD (runs locally for low latency)
         log.info("Initializing VAD...")
-        vad = webrtcvad.Vad(1)
+        vad = VAD()
         services["vad"] = vad
         
         # Load wake word model (runs locally for low latency)

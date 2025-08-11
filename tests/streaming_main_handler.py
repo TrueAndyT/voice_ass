@@ -6,7 +6,7 @@ This demonstrates how to integrate streaming responses into your existing voice 
 
 import time
 from services.llm_streaming_client import StreamingLLMClient, StreamingTTSIntegration
-from services.logger import app_logger
+from services.utils.logger import app_logger
 
 
 def handle_wake_word_interaction_streaming(stt_service, streaming_llm_client, tts_service, log):

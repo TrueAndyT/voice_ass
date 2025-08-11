@@ -1,5 +1,5 @@
 import pytest
-from services.intent_detector import IntentDetector
+from services.handlers.intent_detector import IntentDetector
 
 class TestIntentDetector:
     def setup_method(self):

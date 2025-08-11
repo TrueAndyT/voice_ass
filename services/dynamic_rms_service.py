@@ -2,13 +2,13 @@ import numpy as np
 import threading
 import time
 import pyaudio
-import webrtcvad
+from openwakeword import VAD
 
 class DynamicRMSService:
     def __init__(self, sample_rate=16000, frame_ms=30, window_seconds=3, multiplier=2.0):
         self.sample_rate = sample_rate
         self.frame_samples = int(sample_rate * frame_ms / 1000)
-        self.vad = webrtcvad.Vad(3)
+        self.vad = VAD()
         self.multiplier = multiplier
         self.locked = False
         self.rms_values = []

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test script to verify logging configuration."""
 
-from services.logger import app_logger
+from services.utils.logger import app_logger
 
 # Test different loggers
 main_log = app_logger.get_logger("main")

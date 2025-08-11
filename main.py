@@ -15,15 +15,16 @@ from datetime import datetime
 import time
 import subprocess
 from contextlib import contextmanager
-import webrtcvad
+from openwakeword import VAD
 import numpy as np
 import threading
+import signal
 
 # Import from the services package
 from services.microservices_loader import load_services_microservices
 from services.kwd_service import KWDService
-from services.logger import app_logger
-from services.memory_logger import MemoryLogger
+from services.utils.logger import app_logger
+from services.utils.memory_logger import MemoryLogger
 from services.dynamic_rms_service import DynamicRMSService
 from services.llm_streaming_client import StreamingTTSIntegration
 from services.exceptions import (
@@ -134,10 +135,9 @@ def audio_stream_manager(format_type, channels, rate, frames_per_buffer):
             with suppress_stderr():
                 pa.terminate()
 
-
 def record_audio_for_transcription(stream, timeout_ms=3000, log=None):
     """Record audio from stream until silence is detected."""
-    vad = webrtcvad.Vad(3)
+    vad = VAD()
     recorded_frames = []
     silence_duration_ms = 0
     VAD_FRAME_MS = 30
@@ -179,7 +179,6 @@ def record_audio_for_transcription(stream, timeout_ms=3000, log=None):
             break
     
     return b''.join(recorded_frames)
-
 
 def handle_wake_word_interaction(stt_service, llm_service, tts_service, log):
     """Handle the interaction after wake word detection."""
@@ -229,7 +228,6 @@ def handle_wake_word_interaction(stt_service, llm_service, tts_service, log):
     except Exception as e:
         log.error(f"Error during wake word interaction: {e}", exc_info=True)
 
-
 def handle_followup_conversation(stt_service, llm_service, tts_service, log):
     """Handle the follow-up conversation loop."""
     while True:
@@ -273,7 +271,6 @@ def handle_followup_conversation(stt_service, llm_service, tts_service, log):
             log.error(f"Error during follow-up conversation: {e}", exc_info=True)
             break
 
-
 def run_indexing():
     """Run the file indexing process using LlamaIndex."""
     print("[INFO] Starting file indexing with LlamaIndex...")
@@ -288,21 +285,33 @@ def run_indexing():
 
 def main():
     """Main application entry point with enhanced error handling."""
-    # Parse command line arguments
     parser = argparse.ArgumentParser(description="Voice Assistant with File Search")
     parser.add_argument("--index", action="store_true", help="Run file indexing and exit")
     args = parser.parse_args()
-    
-    # If indexing is requested, run it and exit
+
     if args.index:
         run_indexing()
         return
-    
+
     app_start_time = time.time()
     log = app_logger.get_logger("main")
     mem_logger = None
-    
-    # Configuration
+
+    # ✅ Allow signal handler to access service_manager
+    global service_manager
+    service_manager = None
+
+    # ✅ Register graceful shutdown on signals
+    def signal_handler(sig, frame):
+        log.info(f"Received termination signal: {signal.Signals(sig).name}")
+        if service_manager:
+            service_manager.stop_all_services()
+        log.info("Voice Assistant shutdown via signal")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     CONFIG = {
         "format": pyaudio.paInt16,
         "channels": 1,
@@ -311,18 +320,17 @@ def main():
         "wakeword_threshold": 0.5
     }
     CONFIG["vad_frame_samples"] = int(CONFIG["rate"] * (CONFIG["vad_frame_ms"] / 1000.0))
-    
+
     try:
         log.info("Starting Alexa - Local voice assistant")
-        
+
         # Start memory logging (temporarily disabled to test segfault)
         # mem_logger = MemoryLogger()
         # mem_logger.start()
         mem_logger = None
-        
+
         # Load services with detailed error handling
         log.info("Loading services...")
-        service_manager = None
         try:
             vad, oww_model, stt_service, llm_service, tts_service, dynamic_rms, service_manager = load_services_microservices()
             kwd_service = KWDService(oww_model, vad, dynamic_rms)
@@ -334,7 +342,7 @@ def main():
                 f"Failed to load core services: {str(e)}",
                 context={"startup_time_ms": (time.time() - app_start_time) * 1000}
             )
-        
+
         # Log startup performance
         kwd_ready_time = time.time()
         startup_duration = kwd_ready_time - app_start_time
@@ -343,18 +351,17 @@ def main():
             startup_duration,
             {"services_loaded": 6}
         )
-        
+
         log.info(f"Services loaded successfully in {startup_duration:.2f} seconds")
-        
+
         # Announce readiness
         try:
             tts_service.speak("Hi Master! Alexa at your services.")
         except Exception as e:
             log.warning(f"Could not announce readiness: {e}")
-            
-        
+
         log.info("Voice assistant ready - listening for wake word...")
-        
+
         # Main application loop with audio stream management
         with audio_stream_manager(
             CONFIG["format"], 
@@ -362,8 +369,7 @@ def main():
             CONFIG["rate"], 
             CONFIG["vad_frame_samples"]
         ) as stream:
-            
-            
+
             while True:
                 try:
                     audio_chunk = stream.read(
@@ -372,49 +378,42 @@ def main():
                     )
                     # Update dynamic RMS threshold with the same audio data
                     dynamic_rms.update_threshold(audio_chunk)
-                    
+
                     # Process audio with wake word detection
                     prediction, utterance_buffer = kwd_service.process_audio(audio_chunk)
-                    
+
                     # Handle wake word detection
                     if prediction:
                         log.info(f"Wake word detected! Confidence: {prediction}")
-                        # Don't update intent here - let the wake word interaction handle it
                         handle_wake_word_interaction(stt_service, llm_service, tts_service, log)
-                            
+
                 except AudioException as e:
                     log.error(f"Audio processing error: {e}")
-                    # if publisher:
-                    #     publisher.publish({"state": "Audio Error"})
                     if not e.recoverable:
                         raise
-                    # Continue for recoverable audio errors
                     time.sleep(0.1)
-                    
+
                 except Exception as e:
                     log.error(f"Unexpected error in main loop: {e}", exc_info=True)
-                    # if publisher:
-                    #     publisher.publish({"state": "Error"})
-                    # Continue running - log error but don't crash
                     time.sleep(0.1)
-    
+
     except KeyboardInterrupt:
         log.info("Received shutdown signal (Ctrl+C)")
-    
+
     except VoiceAssistantException as e:
         app_logger.handle_exception(
             type(e), e, e.__traceback__, 
             context=e.context
         )
         sys.exit(1)
-        
+
     except Exception as e:
         app_logger.handle_exception(
             type(e), e, e.__traceback__,
             context={"phase": "startup" if mem_logger is None else "runtime"}
         )
         sys.exit(1)
-        
+
     finally:
         # Cleanup resources
         if mem_logger:
@@ -422,7 +421,7 @@ def main():
         if service_manager:
             service_manager.stop_all_services()
         log.info("Voice Assistant shutting down...")
-        
+
         # Move main_app.log to logs directory if it exists
         try:
             if os.path.exists('main_app.log'):
@@ -432,7 +431,7 @@ def main():
                 os.rename('main_app.log', 'logs/main_app.log')
         except Exception as e:
             print(f"Warning: Could not move main_app.log to logs directory: {e}")
-        
+
         logging.shutdown()
 
 if __name__ == '__main__':

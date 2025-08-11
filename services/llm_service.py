@@ -2,13 +2,13 @@ import ollama
 import os
 import time
 from datetime import datetime
-from .logger import app_logger
+from .utils.logger import app_logger
 from .exceptions import LLMException, ResourceException, ConfigurationException
 from .web_search_service import WebSearchService
 from .llama_file_search_service import LlamaFileSearchService
 from .tts_service import TTSService
-from .intent_detector import IntentDetector
-from .llm_text import LLMText
+from .handlers.intent_detector import IntentDetector
+from .handlers.llm_text import LLMText
 from .handlers.file_search_handler import FileSearchHandler
 from .handlers.memory_handler import MemoryHandler
 from .handlers.web_search_handler import WebSearchHandler

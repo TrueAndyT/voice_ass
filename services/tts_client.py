@@ -6,7 +6,7 @@ Provides the same interface as the original TTS service but communicates via HTT
 
 import requests
 import time
-from .logger import app_logger
+from .utils.logger import app_logger
 from .exceptions import TTSException
 
 class TTSClient:

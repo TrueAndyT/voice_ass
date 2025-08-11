@@ -23,7 +23,7 @@ sys.path.insert(0, project_root)
 
 from services.stt_service import STTService
 from services.dynamic_rms_service import DynamicRMSService
-from services.logger import app_logger
+from services.utils.logger import app_logger
 
 class VRAMMonitor:
     """VRAM monitoring utility for GPU memory tracking."""

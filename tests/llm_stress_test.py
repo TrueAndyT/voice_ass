@@ -16,7 +16,7 @@ import ollama
 sys.path.insert(0, '/home/master/Projects/test')
 
 from services.llm_service import LLMService
-from services.logger import app_logger
+from services.utils.logger import app_logger
 
 class LLMStressTest:
     def __init__(self):

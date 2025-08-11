@@ -12,7 +12,7 @@ from typing import Iterator, Dict
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from services.logger import app_logger
+from services.utils.logger import app_logger
 
 
 def mock_tts_service():

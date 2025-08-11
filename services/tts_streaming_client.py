@@ -7,7 +7,7 @@ Works with both the LLM streaming client and TTS microservice.
 import requests
 import time
 from typing import Iterator, Optional, Generator
-from .logger import app_logger
+from .utils.logger import app_logger
 from .exceptions import TTSException
 
 

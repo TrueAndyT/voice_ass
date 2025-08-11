@@ -1,14 +1,14 @@
 import torch
 import whisper
 import pyaudio
-import webrtcvad
+from openwakeword import VAD
 import numpy as np
 import os
 import time
 import logging.handlers
 from datetime import datetime
 from contextlib import contextmanager
-from .logger import app_logger
+from .utils.logger import app_logger
 from .exceptions import STTException, AudioException, ResourceException, VoiceAssistantException
 
 # --- Configuration ---
@@ -28,7 +28,7 @@ class STTService:
         
         self.device = self._get_device()
         self.model = self._load_model(model_size)
-        self.vad = webrtcvad.Vad(3)
+        self.vad = VAD()  # Use Silero VAD for better performance
         self.model_size = model_size  # Store model size for transcription options
         self.dynamic_rms = dynamic_rms
 

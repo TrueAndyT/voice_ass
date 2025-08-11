@@ -15,7 +15,7 @@ import threading
 import queue
 import time
 import re
-from .logger import app_logger
+from .utils.logger import app_logger
 from .exceptions import TTSException
 
 class TTSService:
