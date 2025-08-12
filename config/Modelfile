@@ -1,10 +1,10 @@
 FROM llama3.1:8b-instruct-q4_K_M
 
 # Set context window to 4K tokens
-PARAMETER num_ctx 4096
+PARAMETER num_ctx 32384
 
 # Optimize for performance and memory usage
-PARAMETER num_predict 4096
+PARAMETER num_predict 32384
 PARAMETER temperature 0.7
 PARAMETER top_p 0.9
 PARAMETER repeat_penalty 1.1

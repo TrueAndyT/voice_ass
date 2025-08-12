@@ -232,11 +232,11 @@ class StreamingTTSIntegration:
                     metrics = chunk_data.get('metrics', {})
                     total_time = time.time() - start_time
                     
-                    self.log.info(f"Streaming TTS completed:")
-                    self.log.info(f"  Total time: {total_time:.2f}s")
-                    self.log.info(f"  Response length: {len(complete_response)} chars")
-                    self.log.info(f"  Chunks sent to TTS: {chunks_sent}")
-                    self.log.info(f"  LLM metrics: {metrics}")
+                    self.log.debug(f"Streaming TTS completed:")
+                    self.log.debug(f"  Total time: {total_time:.2f}s")
+                    self.log.debug(f"  Response length: {len(complete_response)} chars")
+                    self.log.debug(f"  Chunks sent to TTS: {chunks_sent}")
+                    self.log.debug(f"  LLM metrics: {metrics}")
                     
                     break
                 

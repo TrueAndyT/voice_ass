@@ -38,7 +38,7 @@ def play_beep(log=None):
     def _beep():
         try:
             # Path to the wake word success sound
-            sound_file = os.path.join(os.path.dirname(__file__), "config", "sounds", "kwd_success.wav")
+            sound_file = os.path.join(os.path.dirname(__file__), "sounds", "kwd_success.wav")
             
             if log:
                 log.debug(f"Playing wake word detection sound: {sound_file}")

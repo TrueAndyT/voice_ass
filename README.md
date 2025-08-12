@@ -1,129 +1,214 @@
-# 🎙️ Miss Heart – Local Voice Assistant
+# 🎙️ Alexa (Miss Heart) — Fully‑Local Voice Assistant
 
-Miss Heart is a fully local, modular voice assistant designed to run offline on Windows/Linux using your laptop’s microphone and speakers. It leverages **OpenWakeWord**, **Whisper**, **Mistral via Ollama**, and **Kokoro TTS** to enable private, real-time voice interaction.
-
----
-
-## 🧠 Features
-
-- **Wake Word Detection** (Hey Jarvis / Hey Mycroft) via OpenWakeWord
-- **Voice Activity Detection** with webrtcvad + RMS filtering
-- **Speech-to-Text (STT)** using OpenAI Whisper with GPU acceleration
-- **LLM Response Generation** with Mistral 7B via Ollama
-- **Text-to-Speech (TTS)** using Kokoro with custom voice `af_heart`
-- **Follow-up Dialog Mode** with silence timeout
-- **Full GPU Utilization** if available (CUDA)
-- **Extensive Logging** (wake word, STT output, LLM dialog)
-- **No cloud API calls** – everything runs locally
+Alexa is a **fully local**, modular voice assistant that runs on Linux/Windows with your laptop microphone and speakers. It uses **OpenWakeWord**, **Whisper**, **Llama 3.1 via Ollama**, **Kokoro TTS**, and optional **local RAG** (LlamaIndex + FAISS) for private, real‑time voice interaction — no cloud calls by default.
 
 ---
 
-## 🗂️ Project Structure
+## 🧠 Highlights
+
+- **Wake Word** via OpenWakeWord (ONNX) — low‑latency, 16 kHz pipeline
+- **VAD + Dynamic RMS** noise gating to reduce false triggers
+- **STT** with OpenAI Whisper (`small.en`, GPU‑accelerated if available)
+- **LLM** with **Ollama** (default: `llama3.1:8b-instruct-q4_K_M`; alias `alexa-4k`)
+- **TTS** with **Kokoro (hexgrad/Kokoro‑82M)** — fast, warm voice `af_heart`
+- **Streaming LLM→TTS**: speak partial responses immediately (SSE)
+- **Local file search (RAG)** via LlamaIndex + FAISS, opt‑in
+- **Structured logging** for app & perf, rotating STT transcripts
+- **No cloud APIs** needed for voice loop; optional web search integration
+
+---
+
+## 🗂️ Project Layout
 
 ```
 
 .
-├── main.py                 # Orchestrates the whole assistant loop
+├── main.py                     # Application loop (wake word → STT → LLM → TTS)
 ├── services/
-│   ├── loader.py           # Loads and warms up all services
-│   ├── wakeword.py         # Wake word detection service
-│   ├── stt\_service.py      # Whisper-based speech-to-text
-│   ├── tts\_service.py      # Kokoro-based text-to-speech
-│   ├── llm\_service.py      # Mistral LLM via Ollama
-│   └── logger.py           # File-based logging setup
-├── models/                 # Wake word .onnx model files
-├── logs/                   # Wake word and runtime logs
-├── stt/                    # Transcriptions saved here
-├── llm/                    # LLM dialog logs
+│   ├── microservices\_loader.py # Starts FastAPI microservices (TTS/STT/LLM)
+│   ├── service\_manager.py      # Spawns & tracks uvicorn processes
+│   ├── llm\_streaming\_server.py # LLM SSE server (/chat, /chat/stream)
+│   ├── stt\_service\_server.py   # STT server (/transcribe)
+│   ├── tts\_service\_server.py   # TTS server (/speak)
+│   ├── stt\_client.py           # HTTP client for STT microservice
+│   ├── llm\_streaming\_client.py # HTTP/SSE client + StreamingTTSIntegration
+│   ├── tts\_client.py           # HTTP client for TTS microservice
+│   ├── kwd\_service.py          # Wake-word detection w/ VAD + RMS checks
+│   ├── dynamic\_rms\_service.py  # Adaptive noise thresholding
+│   ├── llm\_service.py          # LLM flow, intents, handlers, dialog logging
+│   ├── llama\_indexing\_service.py / llama\_file\_search\_service.py # RAG
+│   ├── handlers/               # file\_search, memory, note, web\_search
+│   └── logger.py               # JSON logs + colored console
+├── config/
+│   ├── Modelfile               # ollama model alias (alexa-4k)
+│   ├── system\_prompt.txt       # persona + style
+│   ├── llm\_responses.json      # canned strings for handlers
+│   ├── search\_config.json      # RAG input folders
+│   ├── notes.json, memory.log  # local notes & memory
+│   └── sounds/kwd\_success.wav  # wake chime
+├── models/
+│   └── alexa\_v0.1.onnx         # OpenWakeWord model (required)
+└── docs/
+└── LOGGING.md, services.md, …
 
 ````
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Quick Start (Linux Mint)
 
-1. **Install Python 3.10+ and venv**
-2. **Set up environment**
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt
-    ```
+1) **System deps**
 
-3. **Dependencies**
-    - `torch`, `numpy`, `sounddevice`, `webrtcvad`, `pyaudio`, `openwakeword`, `whisper`, `ollama`, `kokoro`
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-venv python3-dev portaudio19-dev ffmpeg jq
+````
 
-4. **Start Ollama**
-    ```bash
-    ollama run mistral
-    ```
+2. **Create env**
 
-5. **Place ONNX wake word models**
-    ```
-    models/hey_jarvis_v0.1.onnx
-    models/hey_mycroft_v0.1.onnx
-    ```
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip wheel
+pip install -r requirements.txt
+```
 
-6. **Launch the assistant**
-    ```bash
-    python main.py
-    ```
+3. **Ollama + model**
+
+* Install Ollama: [https://ollama.com/download](https://ollama.com/download)
+* Pull base model and build alias:
+
+```bash
+ollama pull llama3.1:8b-instruct-q4_K_M
+# Optional: create local alias from config/Modelfile
+ollama create alexa-4k -f config/Modelfile
+```
+
+4. **Models & audio**
+
+* Place **wake word** model at: `models/alexa_v0.1.onnx`
+* Ensure the **wake chime** exists: `config/sounds/kwd_success.wav`
+
+5. **Optional web search**
+
+Create a `.env` in the repo root:
+
+```bash
+# NOTE: Variable name matches current code (typo kept for compatibility)
+TRAVILY_API=sk_...   # Tavily Search API key
+```
+
+> ⚠️ Heads‑up: the code expects `TRAVILY_API` (with an “R”). If you prefer `TAVILY_API`, update `services/web_search_service.py` accordingly.
+
+6. **Start (microservices mode, recommended)**
+
+```bash
+python3 main.py
+```
+
+This will:
+
+* Spawn **TTS** on `:8001`, **STT** on `:8002`, **LLM (SSE)** on `:8003`
+* Load OpenWakeWord + VAD locally
+* Announce readiness and listen for the wake word
+
+Health endpoints:
+
+* `http://127.0.0.1:8001/health` (TTS), `:8002/health` (STT), `:8003/health` (LLM)
+
+7. **Build local RAG index (optional)**
+
+Edit `config/search_config.json` to list folders to index, then:
+
+```bash
+python3 main.py --index
+```
+
+This creates a FAISS index in `config/faiss_index/`. You can then ask, e.g., “find the project map” or “search docs about logging”.
 
 ---
 
-## 🔐 Offline by Design
+## 🗣️ How It Works (loop)
 
-This assistant does **not** use cloud APIs. Your voice never leaves your machine.
-
----
-
-## 🛠️ Configuration
-
-Adjust thresholds, timeouts, device preferences, and model settings directly in:
-
-- `main.py` – for rate, thresholds
-- `stt_service.py` – VAD config, language filtering
-- `llm_service.py` – system prompt and behavior
-- `tts_service.py` – Kokoro voice model, rate
+1. **Wake** — KWD buffers 1s windows, filters with dynamic RMS + VAD, and detects the wake word.
+2. **STT** — 16 kHz mono chunks are recorded until silence; Whisper `small.en` transcribes.
+3. **LLM** — Prompt goes to Ollama (default `alexa-4k`/llama 3.1). If a handler intent is detected (notes, memory, web/file search), it routes accordingly.
+4. **Streaming TTS** — The LLM SSE stream is chunked and immediately spoken by Kokoro (`af_heart`); any residual text is flushed at completion. Fallback to non‑streaming if SSE fails.
 
 ---
 
-## 📓 Logs
+## ⚙️ Configuration
 
-- Wake word and system logs: `logs/wakeword.log`
-- Transcriptions: `stt/stt_out_<timestamp>.log`
-- LLM dialog: `llm/dialog_<timestamp>.log`
-
----
-
-## 🧪 Tips
-
-- Speak clearly and naturally when triggering wake words.
-- If transcription quality drops, verify your mic input level and Whisper model size.
-- Set `RMS_THRESHOLD` and `no_speech_threshold` carefully to avoid false triggers or early cutoffs.
+* **Persona**: `config/system_prompt.txt`
+* **Canned strings**: `config/llm_responses.json`
+* **Notes & memory**: `config/notes.json`, `config/memory.log`
+* **RAG**: `config/search_config.json`, persisted index `config/faiss_index/`
+* **Wake chime**: `config/sounds/kwd_success.wav`
 
 ---
 
-## 🧤 Credits
+## 🧾 Logs
 
-- [OpenWakeWord](https://github.com/dscripka/openWakeWord)
-- [Whisper](https://github.com/openai/whisper)
-- [Ollama](https://github.com/jmorganca/ollama)
-- [Kokoro TTS](https://github.com/remsky/Kokoro-FastAPI)
+See `docs/LOGGING.md` for full details. Key files:
+
+* `logs/app.jsonl` — structured app logs (all services)
+* `logs/performance.jsonl` — durations, token/s, etc.
+* `logs/dialog_YYYY-MM-DD_HH-MM-SS.log` — per‑session conversations
+* `logs/transcriptions.log` (+ daily rotation) — raw STT text
+
+Handy:
+
+```bash
+tail -f logs/app.jsonl | jq .
+tail -f logs/performance.jsonl | jq .
+```
+
+---
+
+## 🔌 Troubleshooting
+
+* **No mic / ALSA warnings**: ensure `portaudio19-dev` installed; PulseAudio/JACK noise is suppressed in microservices servers.
+* **Wake word not triggering**: confirm `models/alexa_v0.1.onnx` exists; reduce background noise or tweak the dynamic RMS multiplier.
+* **No TTS audio**: verify default audio sink; `sd.OutputStream` uses system default.
+* **SSE stalls**: check firewall (ports 8001–8003), and that `ollama serve` is reachable.
+* **Web search empty**: verify `.env` key; confirm the env var name (`TRAVILY_API`) matches the code or update the code.
+
+---
+
+## 📦 Requirements
+
+* Python 3.10+
+* `pyaudio`, `webrtcvad` or OpenWakeWord VAD, `numpy`
+* `torch`, `openai-whisper`
+* `ollama` (daemon running)
+* `kokoro` (hexgrad/Kokoro-82M via `KPipeline`)
+* `fastapi`, `uvicorn`, `sseclient-py`
+* `llama-index`, `faiss-cpu`, `sentence-transformers`
+* `requests`, `rich`, `psutil`
+* (Optional) `.env` with Tavily API key
+
+Install via:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 🛣️ Roadmap
+
+* Barge‑in (interrupt TTS on user speech)
+* Tunable KWD thresholds & per‑environment calibration
+* WebSocket/GRPC for lower‑latency streaming
+* Unified config file for ports/devices/models
+* Cross‑platform audio device selection UI
 
 ---
 
 ## ❤️ Voice Persona
 
-Miss Heart is designed to be brief, caring, and warm, speaking in a feminine voice via Kokoro's `af_heart` model. She avoids filler words and emoji to ensure clarity when voiced.
+Alexa speaks in a concise, warm female voice (`af_heart`), avoids filler, and keeps responses short for voice UX.
 
----
-
-## 📌 TODO
-
-- Add interruption detection (stop TTS if user speaks)
-- Timeout-based exit from dialog mode
-- Background launcher service
-- GUI frontend (optional)
+```
 
 ---
